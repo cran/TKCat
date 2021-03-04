@@ -1,0 +1,62 @@
+{
+   "$schema": "TKCat_collections_1.0",
+   "$id":"TKCat_Condition_collection_1.0",
+	"title": "Condition collection",
+	"type": "object",
+	"description": "Collection of condition concepts",
+	"properties": {
+      "$schema": {"enum": ["TKCat_Condition_collection_1.0"]},
+      "$id": {"type": "string"},
+	   "collection": {"enum":["Condition"]},
+		"resource": {"type": "string"},
+		"tables": {
+			"type": "array",
+			"minItems": 1,
+			"items":{
+				"type": "object",
+				"properties":{
+					"name": {"type": "string"},
+					"fields": {
+						"type": "object",
+						"properties": {
+						   "condition": {
+								"type": "object",
+								"properties": {
+									"static": {"type": "boolean"},
+									"value": {"type": "string"}
+								},
+								"required": ["static", "value"],
+								"additionalProperties": false
+							},
+							"source": {
+								"type": "object",
+								"properties": {
+									"static": {"type": "boolean"},
+									"value": {"type": "string"}
+								},
+								"required": ["static", "value"],
+								"additionalProperties": false
+							},
+							"identifier": {
+								"type": "object",
+								"properties": {
+									"static": {"type": "boolean"},
+									"value": {"type": "string"}
+								},
+								"required": ["static", "value"],
+								"additionalProperties": false
+							}
+						},
+						"required": ["condition", "source", "identifier"],
+						"additionalProperties": false
+					}
+				},
+				"required": ["name", "fields"],
+				"additionalProperties": false
+			}
+		}
+	},
+	"required": ["$schema", "$id", "collection", "resource", "tables"],
+	"additionalProperties": false
+}
+	
