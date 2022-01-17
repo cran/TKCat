@@ -18,7 +18,9 @@ import_local_collection <- function(txt, overwrite=FALSE){
       raw <- txt
    }
    
-   if(!jsonvalidate::json_validate(raw, tkcatEnv$COL_SCHEMA, verbose=TRUE)){
+   if(!jsonvalidate::json_validate(
+      raw, tkcatEnv$COL_SCHEMA, verbose=TRUE, engine="ajv"
+   )){
       stop("Not a valid collection")
    }
    def <- jsonlite::fromJSON(raw)
@@ -185,7 +187,7 @@ map_collection_members <- function(
    
    ## Prepare for conversion ----
    ## x
-   xp <- select(
+   xp <- dplyr::select(
       x,
       dplyr::all_of(xm$value[which(!xm$static)])
    ) %>% 
@@ -200,7 +202,7 @@ map_collection_members <- function(
       }
    }
    ## y
-   yp <- select(
+   yp <- dplyr::select(
       y,
       dplyr::all_of(ym$value[which(!ym$static)])
    ) %>% 
@@ -231,7 +233,7 @@ map_collection_members <- function(
          paste0(xm$field, "_x")[which(!xm$static)],
          paste0(ym$field, "_y")[which(!ym$static)]
       ))
-   toRet <- dplyr::select(toRet, all_of(names(toKeep)))
+   toRet <- dplyr::select(toRet, dplyr::all_of(names(toKeep)))
    colnames(toRet) <- toKeep[colnames(toRet)]
    
    return(toRet)

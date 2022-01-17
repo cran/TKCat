@@ -7,7 +7,6 @@
 \alias{[.memoMDB}
 \alias{[[.memoMDB}
 \alias{$.memoMDB}
-\alias{c.memoMDB}
 \title{An \link{MDB} (Modeled DataBase) in memory: memoMDB}
 \usage{
 memoMDB(
@@ -15,6 +14,7 @@ memoMDB(
   dataModel,
   dbInfo,
   collectionMembers = NULL,
+  check = TRUE,
   checks = c("unique", "not nullable", "foreign keys"),
   verbose = FALSE
 )
@@ -28,8 +28,6 @@ memoMDB(
 \method{[[}{memoMDB}(x, i)
 
 \method{$}{memoMDB}(x, i)
-
-\method{c}{memoMDB}(...)
 }
 \arguments{
 \item{dataTables}{a list of tibbles}
@@ -43,6 +41,9 @@ memoMDB(
 \item{collectionMembers}{the members of collections as provided to the
 \link{collection_members<-} function (default: NULL ==> no member).}
 
+\item{check}{logical: if TRUE (default) the data are confronted to the
+data model}
+
 \item{checks}{a character vector with the name of optional checks to be
 done (all of them c("unique", "not nullable", "foreign keys"))}
 
@@ -55,7 +56,7 @@ done (all of them c("unique", "not nullable", "foreign keys"))}
 
 \item{.data}{a \link{memoMDB} object}
 
-\item{...}{\link{memoMDB} objects}
+\item{...}{Use new_name = old_name to rename selected tables}
 
 \item{i}{the index or the name of the tables to take}
 }
@@ -101,7 +102,7 @@ if(requireNamespace("stringr", quietly = TRUE)){
 \itemize{
 \item MDB methods:
 \link{db_info}, \link{data_model}, \link{data_tables}, \link{collection_members},
-\link{count_records}, \link{filter_with_tables}, \link{as_fileMDB}
+\link{count_records}, \link{dims}, \link{filter_with_tables}, \link{as_fileMDB}
 \item Additional general documentation is related to \link{MDB}.
 \item \link{filter.memoMDB}, \link{slice.memoMDB}
 }

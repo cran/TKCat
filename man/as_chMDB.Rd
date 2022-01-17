@@ -4,15 +4,26 @@
 \alias{as_chMDB}
 \title{Push an \link{MDB} object in a ClickHouse database}
 \usage{
-as_chMDB(x, tkcon, overwrite = FALSE)
+as_chMDB(x, tkcon, timestamp = Sys.time(), overwrite = FALSE, by = 10^5)
 }
 \arguments{
 \item{x}{an \link{MDB} object}
 
 \item{tkcon}{a \link{chTKCat} object}
 
+\item{timestamp}{a single POSIXct value as a timestamp for
+the chMDB instance.
+The default value is the current system time.
+If this value is smaller or equal to the chMDB current value, an error is
+thrown. If NA, the current instance is overwritten
+(if the overwrite parameter is set to TRUE) without changing
+the existing timestamp.}
+
 \item{overwrite}{a logical indicating if existing data should be overwritten
 (default: FALSE)}
+
+\item{by}{the size of the batch: number of records to write
+together (default: 10^5)}
 }
 \value{
 A \link{chMDB} object.

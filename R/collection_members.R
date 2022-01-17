@@ -22,11 +22,11 @@ read_collection_members <- function(txt){
    }
    schema <- tkcatEnv$COLLECTIONS %>%
       dplyr::filter(.data$title==mbl$collection) %>%
-      dplyr:: pull("json")
+      dplyr::pull("json")
    if(length(schema)==0){
       stop(sprintf('"%s" is not defined as a collection', mbl$collection))
    }
-   if(!jsonvalidate::json_validate(raw, schema, verbose=TRUE)){
+   if(!jsonvalidate::json_validate(raw, schema, verbose=TRUE, engine="ajv")){
       stop(sprintf("Not valid %s members", mbl$collection))
    }
    mbl$tables <- unique(mbl$tables)
@@ -36,7 +36,7 @@ read_collection_members <- function(txt){
       mb <- mbl$tables[[i]]
       toAdd <- do.call(dplyr::bind_rows, lapply(
          mb$fields,
-         as_tibble
+         dplyr::as_tibble
       ))
       toAdd$field <- names(mb$fields)
       toAdd$table <- mb$name
@@ -111,7 +111,9 @@ write_collection_members <- function(colMembers, path=NA, collection=NULL){
       toWrite$tables <- c(toWrite$tables, list(mToAdd))
    }
    toWrite <- jsonlite::toJSON(toWrite, pretty=TRUE)
-   if(!jsonvalidate::json_validate(toWrite, collection, verbose=TRUE)){
+   if(!jsonvalidate::json_validate(
+      toWrite, collection, verbose=TRUE, engine="ajv"
+   )){
       stop(
          "Invalid collection members json:",
          "check colMembers and collection parameters"

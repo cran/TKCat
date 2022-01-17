@@ -12,8 +12,9 @@
 \method{as_fileMDB}{chMDB}(
   x,
   path,
-  readParameters = DEFAULT_READ_PARAMS,
+  readParameters = list(delim = "\\t", na = "<NA>"),
   htmlModel = TRUE,
+  compress = TRUE,
   by = 10^5,
   ...
 )
@@ -21,32 +22,40 @@
 \method{as_fileMDB}{fileMDB}(
   x,
   path,
-  readParameters = DEFAULT_READ_PARAMS,
+  readParameters = list(delim = "\\t", na = "<NA>"),
   htmlModel = TRUE,
+  compress = TRUE,
+  by = 10^5,
   ...
 )
 
 as_fileMDB(
   x,
   path,
-  readParameters = DEFAULT_READ_PARAMS,
+  readParameters = list(delim = "\\t", na = "<NA>"),
   htmlModel = TRUE,
+  compress = TRUE,
+  by = 10^5,
   ...
 )
 
 \method{as_fileMDB}{memoMDB}(
   x,
   path,
-  readParameters = DEFAULT_READ_PARAMS,
+  readParameters = list(delim = "\\t", na = "<NA>"),
   htmlModel = TRUE,
+  compress = TRUE,
+  by = 10^5,
   ...
 )
 
 \method{as_fileMDB}{metaMDB}(
   x,
   path,
-  readParameters = DEFAULT_READ_PARAMS,
+  readParameters = list(delim = "\\t", na = "<NA>"),
   htmlModel = TRUE,
+  compress = TRUE,
+  by = 10^5,
   ...
 )
 }
@@ -55,17 +64,25 @@ as_fileMDB(
 
 \item{path}{the path where the MDB should be written}
 
-\item{readParameters}{a list with 2 elements:
+\item{readParameters}{The following parameters are currently supported:
 \itemize{
 \item \strong{delim}: a single character used to separate fields within a record
 (default: '\\t')
 \item \strong{quoted_na}: a single logical indicating if missing values inside quotes
-should bbe treated as missing values or strings
-(FALSE: the default \strong{different} from \link[readr:read_delim]{readr::read_delim})
+should be treated as missing values or strings.
+WARNING: THIS PARAMETER IS NOT TAKEN INTO ACCOUNT WITH readr>=2.0.0.
+\item \strong{na}: String used for missing values. The default value for reading
+a fileMDB is "NA". But the default value for writing a fileMDB
+is ""<NA>"".
+This value is written in the DESCRIPTION.json file to avoid ambiguity
+when reading the fileMDB.
 }}
 
 \item{htmlModel}{a logical. If TRUE (default) the model is also plotted in
 an html file.}
+
+\item{compress}{a logical specifying whether saving data
+is to use "gzip" compression (default: TRUE)}
 
 \item{by}{the size of the batch: number of records to write
 together (default: 10^5)}

@@ -8,7 +8,6 @@
 \alias{[.fileMDB}
 \alias{[[.fileMDB}
 \alias{$.fileMDB}
-\alias{c.fileMDB}
 \title{An \link{MDB} (Modeled DataBase) based on files: fileMDB}
 \usage{
 \method{$}{chMDB}(x, i)
@@ -19,6 +18,7 @@ fileMDB(
   dataModel,
   readParameters = DEFAULT_READ_PARAMS,
   collectionMembers = NULL,
+  check = TRUE,
   n_max = 10,
   verbose = FALSE
 )
@@ -32,8 +32,6 @@ fileMDB(
 \method{[[}{fileMDB}(x, i)
 
 \method{$}{fileMDB}(x, i)
-
-\method{c}{fileMDB}(...)
 }
 \arguments{
 \item{x}{a \link{fileMDB} object}
@@ -55,6 +53,9 @@ fileMDB(
 \item{collectionMembers}{the members of collections as provided to the
 \link{collection_members<-} function (default: NULL ==> no member).}
 
+\item{check}{logical: if TRUE (default) the data are confronted to the
+data model}
+
 \item{n_max}{maximum number of records to read
 for checks purpose (default: 10). See also \code{\link[ReDaMoR:confront_data]{ReDaMoR::confront_data()}}.}
 
@@ -65,7 +66,7 @@ for checks purpose (default: 10). See also \code{\link[ReDaMoR:confront_data]{Re
 
 \item{.data}{a \link{fileMDB} object}
 
-\item{...}{\link{fileMDB} objects}
+\item{...}{Use new_name = old_name to rename selected tables}
 }
 \value{
 A fileMDB object
@@ -118,7 +119,7 @@ if(requireNamespace("stringr", quietly = TRUE)){
 \itemize{
 \item MDB methods:
 \link{db_info}, \link{data_model}, \link{data_tables}, \link{collection_members},
-\link{count_records}, \link{filter_with_tables}, \link{as_fileMDB}
+\link{count_records}, \link{dims}, \link{filter_with_tables}, \link{as_fileMDB}
 \item Additional general documentation is related to \link{MDB}.
 \item \link{filter.fileMDB}, \link{slice.fileMDB}
 }

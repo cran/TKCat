@@ -117,7 +117,7 @@ collection_members <- function(x, ...){
 #' @param skip the number of rows to skip (default: 0)
 #' @param n_max maximum number of rows to return (default: Inf)
 #' 
-#' @return A list of [dplyr::tibble]
+#' @return A list of [dplyr::tibble] and [matrix]
 #' 
 #' @export
 #'
@@ -140,6 +140,44 @@ count_records <- function(x, ...){
    UseMethod("count_records", x)
 }
 
+###############################################################################@
+#' Detailed information about the format of the tables
+#'
+#' @param x an object with embedded data tables
+#' @param ... the name of the tables to consider (default: all of them)
+#' 
+#' @return A tibble with one row for each considered table and the
+#' following columns:
+#' 
+#' - name: the name of the table
+#' - format: "table" or "matrix"
+#' - ncol: number of columns
+#' - nrow: number of rows
+#' - records: number of records (`nrow` for tables and `ncol*nrow` for matrices)
+#' - transposed: FALSE by default. TRUE only for matrices stored in a
+#' transposed format.
+#' 
+#' @export
+#'
+dims <- function(x, ...){
+   UseMethod("dims", x)
+}
+
+###############################################################################@
+#' Get the first records of each object data tables
+#'
+#' @param x an object with embedded data tables
+#' @param ... the name of the tables to get (default: all of them)
+#' @param n maximum number of records to return (default: 6)
+#' 
+#' @return A list of [dplyr::tibble] and [matrix]
+#' 
+#' @export
+#'
+heads <- function(x, ..., n=6L){
+   UseMethod("heads", x)
+}
+
 
 ###############################################################################@
 #' Filter an [MDB] object according to provided tables
@@ -150,12 +188,13 @@ count_records <- function(x, ...){
 #' data model.
 #' @param checkTables if TRUE, the tables are confronted to their model
 #' in the data model of x.
+#' @param ... method specific parameters
 #' 
 #' @return a [memoMDB] object
 #' 
 #' @export
 #'
-filter_with_tables <- function(x, tables, checkTables=TRUE){
+filter_with_tables <- function(x, tables, checkTables=TRUE, ...){
    UseMethod("filter_with_tables", x)
 }
 
@@ -165,14 +204,23 @@ filter_with_tables <- function(x, tables, checkTables=TRUE){
 #'
 #' @param x an MDB object
 #' @param path the path where the MDB should be written
-#' @param readParameters a list with 2 elements:
+#' @param readParameters The following parameters are currently supported:
 #' - **delim**: a single character used to separate fields within a record
 #' (default: '\\t')
 #' - **quoted_na**: a single logical indicating if missing values inside quotes
-#' should bbe treated as missing values or strings
-#' (FALSE: the default **different** from [readr::read_delim])
+#' should be treated as missing values or strings.
+#' WARNING: THIS PARAMETER IS NOT TAKEN INTO ACCOUNT WITH readr>=2.0.0.
+#' - **na**: String used for missing values. The default value for reading
+#' a fileMDB is "NA". But the default value for writing a fileMDB
+#' is ""&lt;NA&gt;"".
+#' This value is written in the DESCRIPTION.json file to avoid ambiguity
+#' when reading the fileMDB.
 #' @param htmlModel a logical. If TRUE (default) the model is also plotted in
 #' an html file.
+#' @param compress a logical specifying whether saving data
+#' is to use "gzip" compression (default: TRUE)
+#' @param by the size of the batch: number of records to write
+#' together (default: 10^5)
 #' @param ... method specific parameters
 #' 
 #' @return A [fileMDB] object.
@@ -181,8 +229,10 @@ filter_with_tables <- function(x, tables, checkTables=TRUE){
 #'
 as_fileMDB <- function(
    x, path,
-   readParameters=DEFAULT_READ_PARAMS,
+   readParameters=list(delim="\t", na="<NA>"),
    htmlModel=TRUE,
+   compress=TRUE,
+   by=10^5,
    ...
 ){
    UseMethod("as_fileMDB", x)
@@ -289,14 +339,31 @@ db_disconnect <- function(x){
 #' user to provide a password.
 #' @param ntries the number of times the user can enter a wrong password
 #' (default: 3)
+#' @param ... additional parameters for methods
 #' 
 #' @return A new database connection object.
 #' 
 #' @export
 #' 
-db_reconnect <- function(x, user, password, ntries=3){
+db_reconnect <- function(x, user, password, ntries=3, ...){
    UseMethod("db_reconnect", x)
 }
+
+###############################################################################@
+#' Get database hosts
+#' 
+#' @param x an object with database connection(s)
+#' @param ... additional parameters for methods.
+#' 
+#' @return A character vector with hosts information (generaly 1)
+#' in the following shape: "host:port"
+#' 
+#' @export
+#' 
+get_hosts <- function(x, ...){
+   UseMethod("get_hosts", x)
+}
+
 
 
 ###############################################################################@
@@ -312,6 +379,32 @@ db_reconnect <- function(x, user, password, ntries=3){
 #' 
 get_query <- function(x, query, ...){
    UseMethod("get_query", x)
+}
+
+###############################################################################@
+#' Filter a matrix stored in an MDB
+#' 
+#' @param x an [MDB] object
+#' @param tableName a character vector of length 1 corresponding to the name of
+#' the table to filter (must be a matrix)
+#' @param ... character vectors with the row names and/or columns names to
+#' select. The names of the parameters must correspond to the name of the
+#' column and of the row fields (the matrix cannot be filtered from values).
+#' 
+#' @return A sub-matrix of tableName in x. Only existing elements are returned.
+#' No error is raised if any element is missing. The result must be checked
+#' and adapted to user needs.
+#' 
+#' @examples
+#' \dontrun{
+#' ## Return the matrix of expression values focused on the selected genes
+#' filter_mdb_matrix(x=db, "Expression_value", gene=c("SNCA", "MAPT"))
+#' }
+#' 
+#' @export
+#' 
+filter_mdb_matrix <- function(x, tableName, ...){
+   UseMethod("filter_mdb_matrix", x)
 }
 
 
@@ -332,7 +425,7 @@ explore_MDBs <- function(x, ...){
 
 ###############################################################################@
 ## Helpers ----
-.write_chTables <- function(x, con, dbName, ...){
+.write_chTables <- function(x, con, dbName, by, ...){
    UseMethod(".write_chTables", x)
 }
 .build_etkc_ui <- function(x, ...){

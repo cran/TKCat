@@ -10,6 +10,8 @@
 #' @param dataModel a [ReDaMoR::RelDataModel] object
 #' @param collectionMembers the members of collections as provided to the
 #' [collection_members<-] function (default: NULL ==> no member).
+#' @param check logical: if TRUE (default) the data are confronted to the
+#' data model
 #' @param n_max maximum number of records to read
 #' for checks purpose (default: 10). If 0, the data are not checked.
 #' See also [ReDaMoR::confront_data()].
@@ -20,7 +22,7 @@
 #' @seealso
 #' - MDB methods:
 #' [db_info], [data_model], [data_tables], [collection_members],
-#' [count_records], [filter_with_tables], [as_fileMDB]
+#' [count_records], [dims], [filter_with_tables], [as_fileMDB]
 #' - Additional general documentation is related to [MDB].
 #' - [filter.chMDB], [slice.chMDB]
 #' - [chTKCat], [db_disconnect()], [db_reconnect()]
@@ -33,6 +35,7 @@ chMDB <- function(
    dbInfo,
    dataModel,
    collectionMembers=NULL,
+   check=TRUE,
    n_max=10,
    verbose=FALSE
 ){
@@ -57,59 +60,60 @@ chMDB <- function(
       all(names(dbTables) %in% names(dataModel)),
       all(names(dataModel) %in% names(dbTables))
    )
-   if(length(dbTables)>0){
-      dbTables_t <- do.call(rbind, lapply(
-         strsplit(dbTables, split="[.]"),
-         function(x) gsub("`", "", x)
-      )) %>%
-         magrittr::set_colnames(c("database", "name")) %>% 
-         dplyr::as_tibble()
-      chTables <- list_tables(tkcon$chcon, dbNames=unique(dbTables_t$database))
-      missTab <- dplyr::anti_join(dbTables_t, chTables, by=c("database", "name"))
-      if(nrow(missTab)>0){
-         stop(
-            "The following tables are not in the clickhouse database: ",
-            sprintf("`%s`.`%s`", missTab$database, missTab$name) %>% 
-               paste(collapse=", ")
+   if(check){
+      if(length(dbTables)>0){
+         dbTables_t <- do.call(rbind, lapply(
+            strsplit(dbTables, split="`[.]`"),
+            function(x) gsub("`", "", x)
+         )) %>%
+            magrittr::set_colnames(c("database", "name")) %>% 
+            dplyr::as_tibble()
+         chTables <- list_tables(
+            tkcon$chcon,
+            dbNames=unique(dbTables_t$database)
          )
+         missTab <- dplyr::anti_join(
+            dbTables_t, chTables, by=c("database", "name")
+         )
+         if(nrow(missTab)>0){
+            stop(
+               "The following tables are not in the clickhouse database: ",
+               sprintf("`%s`.`%s`", missTab$database, missTab$name) %>% 
+                  paste(collapse=", ")
+            )
+         }
       }
    }
    
    ## Confront data to model ----
-   query <- "SELECT * FROM %s"
-   stopifnot(is.numeric(n_max), !is.na(n_max), length(n_max)==1)
-   if(!is.infinite(n_max)){
-      query <- paste(query, sprintf("LIMIT %s", n_max))
-   }
-   if(n_max>0){
-      dataTables <- lapply(
-         names(dbTables),
-         function(tn){
-            dbt <- dbTables[tn]
-            query <- sprintf(query, dbt)
-            toRet <- get_query(tkcon, query)
-            for(cn in colnames(toRet)){
-               toRet[,cn] <- ReDaMoR::as_type(
-                  dplyr::pull(toRet, !!cn),
-                  dataModel[[tn]]$fields %>%
-                     dplyr::filter(.data$name==!!cn) %>%
-                     dplyr::pull("type")
-               )
-            }
-            return(toRet)
+   if(check){
+      stopifnot(is.numeric(n_max), !is.na(n_max), length(n_max)==1)
+      if(n_max>0){
+         tmpk <- list(
+            tkcon=tkcon,
+            dbTables=dbTables[names(dataModel)],
+            dataModel=dataModel,
+            dbInfo=dbInfo
+         )
+         class(tmpk) <- c("chMDB", "MDB", class(tmpk))
+         dataTables <- heads(tmpk, n=n_max)
+         names(dataTables) <- names(dbTables)
+         cr <- ReDaMoR::confront_data(
+            dataModel, data=dataTables, n_max=n_max, verbose=FALSE,
+            returnData=FALSE
+         )
+         assign("confrontationReport", cr, envir=tkcatEnv)
+         if(!cr$success){
+            cat(ReDaMoR::format_confrontation_report(
+               cr, title=dbInfo[["name"]]
+            ))
+            stop("Data do not fit the data model")
          }
-      )
-      names(dataTables) <- names(dbTables)
-      cr <- ReDaMoR::confront_data(
-         dataModel, data=dataTables, n_max=n_max, verbose=FALSE,
-         returnData=FALSE
-      )
-      assign("confrontationReport", cr, envir=tkcatEnv)
-      if(!cr$success){
-         stop(ReDaMoR::format_confrontation_report(cr, title=dbInfo[["name"]]))
-      }
-      if(verbose){
-         cat(ReDaMoR::format_confrontation_report(cr, title=dbInfo[["name"]]))
+         if(verbose){
+            cat(ReDaMoR::format_confrontation_report(
+               cr, title=dbInfo[["name"]]
+            ))
+         }
       }
    }
    
@@ -149,7 +153,7 @@ db_disconnect.chMDB <- function(x){
 #' 
 #' @export
 #'
-db_reconnect.chMDB <- function(x, user, password, ntries=3){
+db_reconnect.chMDB <- function(x, user, password, ntries=3, ...){
    xn <- deparse(substitute(x))
    x <- unclass(x)
    tkcon <- x$tkcon
@@ -164,23 +168,63 @@ db_reconnect.chMDB <- function(x, user, password, ntries=3){
 
 ###############################################################################@
 #' 
+#' @rdname get_hosts
+#' @method get_hosts chMDB
+#' 
+#' @export
+#'
+get_hosts.chMDB <- function(x, ...){
+   get_hosts(unclass(x)$tkcon)
+}
+
+
+###############################################################################@
+#' 
+#' @param autoalias Change this parameter only if you know what you're doing.
+#' if TRUE, make relevant alias to query the chMDB
+#' using the table names from the data model. If FALSE, the user must know the
+#' table instance name in the remote database. By default, autoalias is set
+#' to TRUE when using a non-current instance of the database.
+#' 
 #' @rdname get_query
 #' @method get_query chMDB
 #' 
 #' @export
 #'
-get_query.chMDB <- function(x, query, ...){
+get_query.chMDB <- function(x, query, autoalias=!is_current_chMDB(x), ...){
    con <- unclass(x)$tkcon$chcon
    n <- unclass(x)$dbInfo$name
    RClickhouse::dbSendQuery(con, sprintf("USE `%s`", n))
    on.exit(RClickhouse::dbSendQuery(con, "USE default"))
+   if(is.na(autoalias)){
+      autoalias <- FALSE
+   }
+   if(autoalias){
+      dbt <- db_tables(x)$dbTables
+      alias <- paste(
+         "WITH",
+         paste(
+            sprintf(
+               '`%s` AS (SELECT * FROM %s)',
+               names(dbt), dbt
+            ),
+            collapse=", "
+         ),
+         sep=" "
+      )
+      query <- paste(alias, query, sep=" ")
+   }
    DBI::dbGetQuery(con, query, ...) %>%
-      as_tibble()
+      dplyr::as_tibble()
 }
 
 
 ###############################################################################@
 #'
+#' @param timestamp the timestamp of the instance to get.
+#' Default=NA: get the current version.
+#' @param check logical: if TRUE (default) the data are confronted to the
+#' data model
 #' @param n_max maximum number of records to read
 #' for checks purpose (default: 10). See also [ReDaMoR::confront_data()].
 #' 
@@ -189,33 +233,78 @@ get_query.chMDB <- function(x, query, ...){
 #' 
 #' @export
 #'
-get_MDB.chTKCat <- function(x, dbName, n_max=10, ...){
+get_MDB.chTKCat <- function(x, dbName, timestamp=NA, check=TRUE, n_max=10, ...){
+   timestamp <- as.POSIXct(timestamp)
    stopifnot(
-      is.chTKCat(x)
+      is.chTKCat(x),
+      is.na(timestamp) || inherits(timestamp, "POSIXct"), length(timestamp)==1
    )
    dbl <- list_MDBs(x)
    if(!is.data.frame(dbl) || !dbName %in% dbl$name){
-      stop(sprintf("%s does not exist in the provided chTKCat", dbName))
+      stop(sprintf(
+         "%s does not exist in the provided chTKCat",
+         dbName
+      ))
+   }
+   if(dplyr::filter(dbl, .data$name==!!dbName)$access=="none"){
+      stop(sprintf("You don't have permission to access %s", dbName))
+   }
+   
+   tst <- list_chMDB_timestamps(x, dbName)
+   if(is.null(tst) || nrow(tst)==0){
+      tstToComplete <- TRUE
+      if(!is.na(timestamp)){
+         stop("This MDB is not timestamped: timestamp must be NA")
+      }else{
+         if(!dplyr::filter(dbl, .data$name==!!dbName)$populated){
+            stop(sprintf("The %s is not populated yet", dbName))
+         }
+         tst <- dplyr::tibble(
+            table=setdiff(names(CHMDB_DATA_MODEL), MGT_TABLES)
+         ) %>% 
+            dplyr::mutate(
+               instance=.data$table
+            )
+      }
+   }else{
+      tstToComplete <- FALSE
+      if(is.na(timestamp)){
+         if(is.na(attr(tst, "current"))){
+            stop("There is no current instance of the MDB: provide a timestamp")
+         }else{
+            timestamp <- attr(tst, "current")
+         }
+      }
+      if(!timestamp %in% tst$timestamp){
+         stop("The selected timestamp does not exist")
+      }
+      tst <- tst %>% 
+         dplyr::filter(.data$timestamp==!!timestamp)
    }
    
    ## Data model ----
+   tsSelect <- function(table){
+      sprintf(
+         "SELECT * FROM `%s`.`%s`",
+         dbName,
+         tst$instance[which(tst$table==table)]
+      )
+   }
    dbm <- list(
       tables=get_query(
-         x, sprintf("SELECT * FROM `%s`.`___Tables___`", dbName)
+         x, tsSelect("___Tables___")
       ),
       fields=get_query(
-         x, sprintf("SELECT * FROM `%s`.`___Fields___`", dbName)
+         x, tsSelect("___Fields___")
       ),
       primaryKeys=get_query(
-         x,
-         sprintf("SELECT * FROM `%s`.`___PrimaryKeys___`", dbName)
+         x, tsSelect("___PrimaryKeys___")
       ),
       foreignKeys=get_query(
-         x,
-         sprintf("SELECT * FROM `%s`.`___ForeignKeys___`", dbName)
+         x, tsSelect("___ForeignKeys___")
       ),
       indexes=get_query(
-         x, sprintf("SELECT * FROM `%s`.`___Indexes___`", dbName)
+         x, tsSelect("___Indexes___")
       )
    )
    dbm$fields$nullable <- as.logical(dbm$fields$nullable)
@@ -225,22 +314,26 @@ get_MDB.chTKCat <- function(x, dbName, n_max=10, ...){
    
    ## DB information ----
    dbInfo <- as.list(get_query(
-      x, sprintf("SELECT * FROM `%s`.`___MDB___`", dbName)
+      x, tsSelect("___MDB___")
    ))
-   
+   dbInfo <- c(dbInfo, list("timestamp"=as.POSIXct(timestamp)))
+
    ## DB tables ----
+   if(tstToComplete){
+      tst <- rbind(
+         tst,
+         dplyr::tibble(table=names(dataModel), instance=names(dataModel))
+      )
+   }
    dbTables <- sprintf(
-      "`%s`.`%s`", dbInfo$name, names(dataModel)
+      "`%s`.`%s`", dbName, tst$instance
    )
-   names(dbTables) <- names(dataModel)
+   names(dbTables) <- tst$table
+   dbTables <- dbTables[names(dataModel)]
    
    ## Collection members ----
    collectionMembers <- get_query(
-      x,
-      statement=sprintf(
-         "SELECT * FROM `%s`.`___CollectionMembers___`",
-         dbName
-      )
+      x, tsSelect("___CollectionMembers___")
    ) %>%
       dplyr::mutate(
          resource=dbName,
@@ -258,6 +351,7 @@ get_MDB.chTKCat <- function(x, dbName, n_max=10, ...){
       dbInfo=dbInfo,
       dataModel=dataModel,
       collectionMembers=collectionMembers,
+      check=check,
       n_max=n_max,
       verbose=FALSE
    ))
@@ -279,61 +373,242 @@ is.chMDB <- function(x){
 
 
 ###############################################################################@
+#' Check if the [chMDB] object refers to the current instance of the MDB
+#' 
+#' @param x a [chMDB] object
+#' 
+#' @return A single logical:
+#' TRUE if x refers to the current instance of the MDB.
+#' 
+#' @export
+#'
+is_current_chMDB <- function(x){
+   stopifnot(is.chMDB(x))
+   ots <- db_info(x)$timestamp
+   dts <- list_chMDB_timestamps(unclass(x)$tkcon, db_info(x)$name) %>% 
+      attr("current")
+   if(is.na(ots)){
+      if(is.null(dts) || is.na(dts)){
+         return(TRUE)
+      }else{
+         warning(
+            "This object is not timestamped but timestamps exist in",
+            " the chTKCat database"
+         )
+         return(NA)
+      }
+   }else{
+      if(is.null(dts) || is.na(dts)){
+         warning("The database in chTKCat is not timestamped")
+         return(NA)
+      }
+      return(dts==ots)
+   }
+}
+
+
+###############################################################################@
 #' Push an [MDB] object in a ClickHouse database
 #'
 #' @param x an [MDB] object
 #' @param tkcon a [chTKCat] object
+#' @param timestamp a single POSIXct value as a timestamp for
+#' the chMDB instance.
+#' The default value is the current system time.
+#' If this value is smaller or equal to the chMDB current value, an error is
+#' thrown. If NA, the current instance is overwritten
+#' (if the overwrite parameter is set to TRUE) without changing
+#' the existing timestamp.
 #' @param overwrite a logical indicating if existing data should be overwritten
 #' (default: FALSE)
+#' @param by the size of the batch: number of records to write
+#' together (default: 10^5)
 #' 
 #' @return A [chMDB] object.
 #' 
 #' @export
 #'
-as_chMDB <- function(x, tkcon, overwrite=FALSE){
-   stopifnot(is.MDB(x))
-   stopifnot(is.chTKCat(tkcon))
+as_chMDB <- function(x, tkcon, timestamp=Sys.time(), overwrite=FALSE, by=10^5){
+   
+   timestamp <- as.POSIXct(timestamp)
+   stopifnot(
+      is.MDB(x),
+      is.chTKCat(tkcon),
+      is.na(timestamp[1]) || inherits(timestamp, "POSIXct"),
+      length(timestamp)==1,
+      is.logical(overwrite), length(overwrite)==1, !is.na(overwrite)
+   )
    con <- tkcon$chcon
    dbInfo <- db_info(x)
+   dbInfo <- dbInfo[setdiff(names(dbInfo), "timestamp")]
    dbName <- dbInfo$name
    dataModel <- data_model(x)
    collectionMembers <- collection_members(x)
    
    ## Check existence and availability ----
-   if(!dbName %in% list_MDBs(tkcon, withInfo=FALSE)){
+   mdbl <- list_MDBs(tkcon, withInfo=TRUE)
+   if(!dbName %in% mdbl$name){
       stop(
          sprintf("%s does not exist in the chTKCat.", dbName),
-         "Create it or contact the administrator of the chTKCat."
+         "Create it first."
       )
    }
-   if(
-      dbName %in% list_MDBs(tkcon, withInfo=TRUE)$name
-   ){
-      if(!overwrite){
-         stop(
-            sprintf("%s is already used and filled.", dbName),
-            " Set overwrite to TRUE if you want to replace the content."
-         )
+   
+   ## Rules of update ----
+   tst <- list_chMDB_timestamps(tkcon, dbName)
+   maxTs <- suppressWarnings(max(tst$timestamp))
+   if(!is.na(timestamp) && !is.null(maxTs) && timestamp <= maxTs){
+      stop("Timestamp should be more recent than those already recorded")
+   }
+   makeEmpty <- makeArchive <- setTS <- FALSE
+   if(!dbName %in% mdbl$name[which(mdbl$populated)]){
+      ### Not Populated ----
+      if(is.null(tst) || nrow(tst)==0){
+         #### No ETS ----
+         if(is.na(timestamp)){
+            ###### No TS ----
+            ## ==> Fill
+         }else{
+            ###### TS ----
+            ## ==> Fill
+            setTS <- TRUE
+         }
       }else{
-         empty_chMDB(tkcon, dbName)
+         #### ETS ----
+         if(is.na(timestamp)){
+            ###### No TS ----
+            stop("This MDB is timestamped: a timestamp must be provided")
+         }else{
+            ###### TS ----
+            ## ==> Fill
+            setTS <- TRUE
+         }
+      }
+   }else{
+      ### Populated ----
+      if(is.null(tst) || nrow(tst)==0){
+         #### No ETS ----
+         if(overwrite){
+            ##### Overwrite ----
+            if(is.na(timestamp)){
+               ###### No TS ----
+               makeEmpty <- TRUE
+               ## ==> Fill
+            }else{
+               ###### TS ----
+               makeEmpty <- TRUE
+               ## ==> Fill
+               setTS <- TRUE
+            }
+         }else{
+            ##### Not overwrite ----
+            if(is.na(timestamp)){
+               ###### No TS ----
+               stop(
+                  sprintf("%s is already used and filled.", dbName),
+                  " Set overwrite to TRUE if you want to replace the content.",
+                  " Or provide a timestamp to push a new instance."
+               )
+            }else{
+               ###### TS ----
+               makeArchive <- TRUE
+               ## ==> Fill
+               setTS <- TRUE
+            }
+         }
+      }else{
+         #### ETS ----
+         if(overwrite){
+            ##### Overwrite ----
+            if(is.na(timestamp)){
+               ###### No TS ----
+               timestamp <- attr(tst, "current")
+               makeEmpty <- TRUE
+               ## ==> Fill
+               setTS <- TRUE
+            }else{
+               ###### TS ----
+               makeEmpty <- TRUE
+               ## ==> Fill
+               setTS <- TRUE
+            }
+         }else{
+            ##### Not overwrite ----
+            if(is.na(timestamp)){
+               ###### No TS ----
+               stop(
+                  sprintf("%s is already used and filled.", dbName),
+                  " Set overwrite to TRUE if you want to replace the content.",
+                  " Or provide a timestamp to push a new instance."
+               )
+            }else{
+               ###### TS ----
+               makeArchive <- TRUE
+               ## ==> Fill
+               setTS <- TRUE
+            }
+         }
       }
    }
    
-   ## Add relevant collections ----
+   ## Identify tables already recorded in CH ----
+   ## and that don't need to be rewritten
+   if(is.chMDB(x) | is.metaMDB(x)){
+      if(get_hosts(tkcon) %in% get_hosts(x)){
+         chTables <- db_tables(x, host=get_hosts(tkcon))$dbTables
+         if(is.null(tst) || nrow(tst)==0){
+            availableTables <- list_tables(tkcon$chcon, dbName) %>% 
+               dplyr::select("table"="name", "instance"="name")
+         }else{
+            availableTables <- tst %>% dplyr::select("table", "instance")
+         }
+         availableTables$path <- sprintf(
+            "`%s`.`%s`", dbName, availableTables$instance
+         )
+         availableTables$inCh <- as.character(chTables[availableTables$table])
+         toKeep <- availableTables$table[which(
+            availableTables$table==availableTables$instance &
+            availableTables$path==availableTables$inCh
+         )] %>% 
+            as.character()
+      }else{
+         toKeep <- character()
+      }
+   }else{
+      toKeep <- character()
+   }
+
+   ## Apply rules before filling ----
+   if(makeEmpty){
+      message("Make empty")
+      .empty_chMDB(tkcon, dbName, .toKeep=toKeep)
+   }
+   if(makeArchive){
+      message("Make archive")
+      .archive_chMDB(tkcon, dbName, .toKeep=toKeep)
+   }
+   
+   ## FILL ----
+   message("Fill")
+   
+   ### Add relevant collections ----
    if(!is.null(collectionMembers) && nrow(collectionMembers)>0){
       toAdd <- unique(collectionMembers$collection)
-      toAdd <- setdiff(toAdd, pull(list_chTKCat_collections(tkcon), "title"))
+      toAdd <- setdiff(
+         toAdd, dplyr::pull(list_chTKCat_collections(tkcon), "title")
+      )
       for(col in toAdd){
          add_chTKCat_collection(tkcon, col)
       }
    }
    
-   ## Write DB information ----
+   ### Write DB information ----
    ch_insert(
-      con=con, dbName=dbName, tableName="___MDB___", value=as_tibble(dbInfo)
+      con=con, dbName=dbName, tableName="___MDB___",
+      value=dplyr::as_tibble(dbInfo)
    )
    
-   ## Write data model ----
+   ### Write data model ----
    er <- try({
       dbm <- ReDaMoR::toDBM(dataModel)
       ch_insert(
@@ -372,32 +647,47 @@ as_chMDB <- function(x, tkcon, overwrite=FALSE){
       stop(as.character(er))
    }
    
-   ## Write collection members ----
-   er <- try({
-      ch_insert(
-         con=con, dbName=dbName, tableName="___CollectionMembers___",
-         value=dplyr::select(
-            collectionMembers,
-            dplyr::all_of(
-               CHMDB_DATA_MODEL$"___CollectionMembers___"$fields$name
+   ### Write collection members ----
+   if(!is.null(collectionMembers)){
+      er <- try({
+         ch_insert(
+            con=con, dbName=dbName, tableName="___CollectionMembers___",
+            value=dplyr::select(
+               collectionMembers,
+               dplyr::all_of(
+                  CHMDB_DATA_MODEL$"___CollectionMembers___"$fields$name
+               )
             )
          )
+      }, silent=FALSE)
+      if(inherits(er, "try-error")){
+         empty_chMDB(tkcon, dbName)
+         stop(as.character(er))
+      }
+   }
+   
+   ### Write data ----
+   er <- try({
+      toWrite <- setdiff(names(x), toKeep)
+      mergeTrees_from_RelDataModel(
+         con=con, dbName=dbName,
+         dbm=dataModel[toWrite, rmForeignKeys=TRUE]
       )
+      .write_chTables(x[toWrite], con, dbName, by=by)
    }, silent=FALSE)
    if(inherits(er, "try-error")){
       empty_chMDB(tkcon, dbName)
       stop(as.character(er))
    }
    
-   ## Write data ----
-   er <- try({
-      mergeTrees_from_RelDataModel(con=con, dbName=dbName, dbm=dataModel)
-      .write_chTables(x, con, dbName)
-   }, silent=FALSE)
-   if(inherits(er, "try-error")){
-      empty_chMDB(tkcon, dbName)
-      stop(as.character(er))
+   ## Set TS if required ----
+   if(setTS){
+      message("Set timestamp")
+      set_chMDB_timestamp(tkcon, dbName, timestamp)
    }
+   
+   ## Update grants ----
+   update_chMDB_grants(tkcon, dbName)
    
    ## Return the chMDB object ----
    return(get_MDB(x=tkcon, dbName=dbName))
@@ -414,6 +704,13 @@ as_chMDB <- function(x, tkcon, overwrite=FALSE){
 #' @export
 #'
 'names<-.chMDB' <- function(x, value){
+   stopifnot(
+      length(x)==length(value),
+      sum(duplicated(value))==0
+   )
+   if(length(x)==0){
+      return(x)
+   }
    colMb <- collection_members(x)
    ovalues <- names(x)
    x <- unclass(x)
@@ -428,7 +725,7 @@ as_chMDB <- function(x, tkcon, overwrite=FALSE){
          }
       }
    }
-   names(x$dataModel) <- names(x$dbTables) <-value
+   names(x$dataModel) <- names(x$dbTables) <- value
    class(x) <- c("chMDB", class(x))
    collection_members(x) <- ncolMb
    return(x)
@@ -446,10 +743,10 @@ as_chMDB <- function(x, tkcon, overwrite=FALSE){
 #' @export
 #' 
 rename.chMDB <- function(.data, ...){
-   loc <- tidyselect::eval_rename(expr(c(...)), .data)
+   loc <- tidyselect::eval_rename(rlang::expr(c(...)), .data)
    names <- names(.data)
    names[loc] <- names(loc)
-   set_names(.data, names)
+   magrittr::set_names(.data, names)
 }
 
 
@@ -601,11 +898,14 @@ data_tables.chMDB <- function(x, ..., skip=0, n_max=Inf){
       is.numeric(skip), length(skip)==1, skip>=0, is.finite(skip),
       is.numeric(n_max), length(n_max)==1, n_max>0
    )
+   if(length(x)==0){
+      return(list())
+   }
    if(is.infinite(n_max)){
       n_max <- max(count_records(x, ...))
    }
    m <- data_model(x)
-   toTake <- tidyselect::eval_select(expr(c(...)), x)
+   toTake <- tidyselect::eval_select(rlang::expr(c(...)), x)
    if(length(toTake)==0){
       toTake <- 1:length(x)
       names(toTake) <- names(x)
@@ -615,24 +915,11 @@ data_tables.chMDB <- function(x, ..., skip=0, n_max=Inf){
    toRet <- lapply(
       names(toTake),
       function(tn){
-         toRet <- get_query(
+         .get_ch_mtable(
             x,
-            sprintf(
-               "SELECT * from %s ORDER BY %s LIMIT %s, %s",
-               toTake[tn],
-               .get_tm_sortKey(m[[tn]], quoted=TRUE),
-               skip, n_max
-            )
+            tablePath=toTake[tn], tableModel=m[[tn]],
+            skip=skip, n_max=n_max
          )
-         attr(toRet, "data.type") <- NULL
-         for (cn in colnames(toRet)) {
-            toRet[, cn] <- as_type(
-               dplyr::pull(toRet, !!cn),
-               dplyr::filter(m[[tn]]$fields, .data$name==!!cn) %>%
-                  dplyr::pull("type")
-            )
-         }
-         return(toRet)
       }
    )
    names(toRet) <- names(toTake)
@@ -642,53 +929,138 @@ data_tables.chMDB <- function(x, ..., skip=0, n_max=Inf){
 
 ###############################################################################@
 #' 
-#' @rdname count_records
-#' @method count_records chMDB
+#' @rdname heads
+#' @method heads chMDB
 #' 
 #' @export
 #'
-count_records.chMDB <- function(x, ...){
-   toTake <- tidyselect::eval_select(expr(c(...)), x)
+heads.chMDB <- function(x, ..., n=6L){
+   stopifnot(
+      is.numeric(n), length(n)==1, n>0
+   )
+   if(length(x)==0){
+      return(list())
+   }
+   m <- data_model(x)
+   toTake <- tidyselect::eval_select(rlang::expr(c(...)), x)
    if(length(toTake)==0){
       toTake <- 1:length(x)
       names(toTake) <- names(x)
    }
    dbt <- db_tables(x)
-   dbt$dbTables <- dbt$dbTables[toTake]
-   dbTables_t <- do.call(rbind, lapply(
-      strsplit(dbt$dbTables, split="[.]"),
-      function(x) gsub("`", "", x)
-   )) %>% 
-      magrittr::set_colnames(c("database", "name")) %>% 
-      dplyr::as_tibble()
-   chTables <- list_tables(
-      dbt$tkcon$chcon, dbNames=unique(dbTables_t$database)
+   toTake <- dbt$dbTables[toTake]
+   toRet <- lapply(
+      names(toTake),
+      function(tn){
+         .head_ch_mtable(
+            x,
+            tablePath=toTake[tn], tableModel=m[[tn]],
+            n=n
+         )
+      }
    )
-   dbTables_t <- dplyr::left_join(
-      dbTables_t, chTables, by=c("database", "name")
-   )
-   toRet <- dbTables_t$total_rows
    names(toRet) <- names(toTake)
    return(toRet)
 }
 
 
 ###############################################################################@
-#' Get the DB tables from a [chMDB] object
 #' 
-#' @param x a [chMDB] object
+#' @rdname dims
+#' @method dims chMDB
+#' 
+#' @export
+#'
+dims.chMDB <- function(x, ...){
+   if(length(x)==0){
+      return(dplyr::tibble(
+         name=character(),
+         format=character(),
+         ncol=numeric(),
+         nrow=numeric(),
+         records=numeric(),
+         transposed=logical()
+      ))
+   }
+   toTake <- tidyselect::eval_select(rlang::expr(c(...)), x)
+   if(length(toTake)==0){
+      toTake <- 1:length(x)
+      names(toTake) <- names(x)
+   }
+   toTake <- names(toTake)
+   dbt <- db_tables(x)
+   toTake <- dbt$dbTables[toTake]
+   m <- data_model(x)
+   
+   toRet <- do.call(dplyr::bind_rows, lapply(
+      names(toTake),
+      function(tn){
+         .dim_ch_mtable(
+            x,
+            tablePath=toTake[tn], tableModel=m[[tn]]
+         )
+      }
+   )) %>%
+      dplyr::mutate(name=names(toTake)) %>% 
+      dplyr::relocate("name")
+   
+   return(toRet)
+   
+}
+
+
+###############################################################################@
+#' Get the DB tables from a [chMDB] or [metaMDB] object
+#' 
+#' @param x a [chMDB] or a [metaMDB] object
+#' @param host the name of host (as returned by `[get_hosts]`) to focus on.
+#' Only used with [metaMDB] objects.
 #' 
 #' @return a list with a chTKCat object (tkcon) and
 #' a named vector of DB table names (dbTables).
 #' 
 #' @export
 #'
-db_tables <- function(x){
-   stopifnot(is.chMDB(x))
-   x <- unclass(x)
-   toTake <- c("tkcon", "dbTables")
-   stopifnot(all(toTake %in% names(x)))
-   return(x[toTake])
+db_tables <- function(x, host){
+   stopifnot(is.chMDB(x) || is.metaMDB(x))
+   if(is.chMDB(x)){
+      x <- unclass(x)
+      toTake <- c("tkcon", "dbTables")
+      stopifnot(all(toTake %in% names(x)))
+      return(x[toTake])
+   }
+   if(is.metaMDB(x)){
+      hosts <- get_hosts(x)
+      if(missing(host)){
+         host <- hosts[1]
+         if(length(hosts)>1){
+            warning(
+               sprintf("No host provided ==> taking the first one: %s", host)
+            )
+         }
+      }
+      mdbs <- MDBs(x)
+      toRet <- lapply(mdbs, function(y){
+         if(is.metaMDB(y)){
+            toRet <- db_tables(y, host)
+         }else{
+            if(is.chMDB(y) && get_hosts(y)==host){
+               toRet <- db_tables(y)
+            }else{
+               toRet <- NULL
+            }
+         }
+         return(toRet)
+      })
+      toRet <- toRet[which(lengths(toRet)>0)] %>% magrittr::set_names(NULL)
+      if(length(toRet) > 0){
+         toRet <- list(
+            tkcon=toRet[[1]]$tkcon,
+            dbTables=do.call(c, lapply(toRet, function(z) z$dbTables))
+         )
+      }
+      return(toRet)
+   }
 }
 
 
@@ -711,7 +1083,8 @@ db_tables <- function(x){
          tkcon=db_tables(x)$tkcon,
          dbTables=as.character(),
          dbInfo=dbi,
-         dataModel=RelDataModel(l=list())
+         dataModel=ReDaMoR::RelDataModel(l=list()),
+         check=FALSE
       ))
    }
    stopifnot(
@@ -741,7 +1114,8 @@ db_tables <- function(x){
       dbTables=dbt,
       dbInfo=dbi,
       dataModel=dm,
-      collectionMembers=cm
+      collectionMembers=cm,
+      check=FALSE
    )
    return(toRet)
 }
@@ -770,7 +1144,7 @@ db_tables <- function(x){
          grep('.rs.explorer.inspectObject', deparse(sys.calls()), value=FALSE)
       )
       if(length(cc)!=0){
-         invisible(as.character(data_files(x)$dataFiles[i]))
+         invisible()
       }else{
          return(data_tables(x, dplyr::all_of(i))[[1]])
       }
@@ -782,62 +1156,7 @@ db_tables <- function(x){
 
 
 ###############################################################################@
-#'
-#' @param ... [chMDB] objects
-#'
-#' @rdname chMDB
 #' 
-#' @export
-#'
-c.chMDB <- function(...){
-   alldb <- list(...)
-   if(length(alldb)==0){
-      stop("At least one chMDB should be provided as an input")
-   }
-   dbt <- db_tables(alldb[[1]])
-   tkcon <- dbt$tkcon
-   for(i in 1:length(alldb)){
-      if(!is.chMDB(alldb[[i]])){
-         stop("All objects should be chMDB")
-      }
-      tkconi <- db_tables(alldb[[i]])$tkcon
-      if(!all(c(
-         tkconi$chcon@host==tkcon$chcon@host,
-         tkconi$chcon@port==tkcon$chcon@port
-      ))){
-         stop(
-            "chMDB are not from the same chTKCat instance.",
-            " Check hosts and ports."
-         )
-      }
-   }
-   dbt <- dbt$dbTables
-   di <- db_info(alldb[[1]])
-   dm <- data_model(alldb[[1]])
-   dc <- collection_members(alldb[[1]])
-   if(length(alldb)>1) for(i in 2:length(alldb)){
-      dm <- c(dm, data_model(alldb[[i]]))
-      dbt <- c(dbt, db_tables(alldb[[i]])$dbTables)
-      dc <- dplyr::bind_rows(
-         dc,
-         collection_members(alldb[[i]]) %>%
-            dplyr::mutate(resource=di$name)
-      )
-   }
-   chMDB(
-      tkcon=tkcon,
-      dbTables=dbt,
-      dbInfo=di,
-      dataModel=dm,
-      collectionMembers=dc
-   )
-}
-
-
-###############################################################################@
-#' 
-#' @param by the size of the batch: number of records to write
-#' together (default: 10^5)
 #' 
 #' @rdname as_fileMDB
 #' @method as_fileMDB chMDB
@@ -846,8 +1165,9 @@ c.chMDB <- function(...){
 #'
 as_fileMDB.chMDB <- function(
    x, path,
-   readParameters=DEFAULT_READ_PARAMS,
+   readParameters=list(delim="\t", na="<NA>"),
    htmlModel=TRUE,
+   compress=TRUE,
    by=10^5,
    ...
 ){
@@ -873,7 +1193,7 @@ as_fileMDB.chMDB <- function(
    dir.create(modelPath)
    jModelPath <- file.path(modelPath, paste0(dbName, ".json"))
    hModelPath <- file.path(modelPath, paste0(dbName, ".html"))
-   write_json_data_model(dm, jModelPath)
+   ReDaMoR::write_json_data_model(dm, jModelPath)
    if(htmlModel){
       plot(dm) %>%
          visNetwork::visSave(hModelPath)
@@ -899,20 +1219,27 @@ as_fileMDB.chMDB <- function(
    ## Data ----
    dataPath <- file.path(fullPath, "data")
    dir.create(dataPath)
-   ext <- ".txt.gz"
+   ext <- ifelse(compress, ".txt.gz", ".txt")
    dfiles <- file.path(dataPath, paste0(names(x), ext))
    names(dfiles) <- names(x)
    for(tn in names(x)){
-      toWrite <- data_tables(x, dplyr::all_of(tn), skip=0, n_max=by)[[1]]
-      r <- nrow(toWrite)
-      while(nrow(toWrite)>0){
+      ddim <- dims(x, dplyr::all_of(tn))
+      r <- 0
+      toWrite <- data_tables(x, dplyr::all_of(tn), skip=r, n_max=by)[[1]]
+      while(!is.null(toWrite) && nrow(toWrite)>0){
+         if(is.matrix(toWrite)){
+            toWrite <- dplyr::as_tibble(toWrite, rownames="___ROWNAMES___")
+         }
          readr::write_delim(
             toWrite, file=dfiles[tn],
             delim=rp$delim,
+            na=rp$na,
+            quote="all", escape="double",
             append=file.exists(dfiles[tn])
          )
+         r <- r + nrow(toWrite)
+         message(sprintf("%s rows written over %s", r, ddim$nrow))
          toWrite <- data_tables(x, dplyr::all_of(tn), skip=r, n_max=by)[[1]]
-         r <- r+nrow(toWrite)
       }
    }
    
@@ -949,10 +1276,13 @@ filter.chMDB <- function(.data, ..., by=10^5, .preserve=FALSE){
    
    ## Apply rules
    toRet <- list()
-   dots <- enquos(...)
+   dots <- rlang::enquos(...)
    for(tn in names(dots)){
       if(!tn %in% names(x)){
          stop(sprintf("%s table does not exist", tn))
+      }
+      if(ReDaMoR::is.MatrixModel(data_model(x)[[tn]])){
+         stop("Cannot filter a matrix: start from another table")         
       }
       ft <- c()
       toAdd <- data_tables(x, dplyr::all_of(tn), skip=0, n_max=by)[[1]]
@@ -1000,10 +1330,13 @@ slice.chMDB <- function(.data, ..., by=10^5, .preserve=FALSE){
    if(!tn %in% names(x)){
       stop(sprintf("%s table does not exist", tn))
    }
+   if(ReDaMoR::is.MatrixModel(data_model(x)[[tn]])){
+      stop("Cannot slice a matrix: start from another table")         
+   }
    i <- dots[[tn]]
    
    ft <- data_tables(x, dplyr::all_of(tn), skip=0, n_max=1)[[1]] %>% 
-      slice(2)
+      dplyr::slice(2)
    s <- 0
    j <- i-s
    j <- j[j>0 & j <=by]
@@ -1015,7 +1348,7 @@ slice.chMDB <- function(.data, ..., by=10^5, .preserve=FALSE){
       )
    }
    r <- s+by
-   while(r <= count_records(x, all_of(tn))){
+   while(r <= count_records(x, dplyr::all_of(tn))){
       s <- r
       j <- i-s
       j <- j[j>0 & j <=by]
@@ -1038,12 +1371,15 @@ slice.chMDB <- function(.data, ..., by=10^5, .preserve=FALSE){
 
 ###############################################################################@
 #' 
+#' @param by the size of the batch: number of records to process
+#' together (default: 10000)
+#' 
 #' @rdname filter_with_tables
 #' @method filter_with_tables chMDB
 #' 
 #' @export
 #'
-filter_with_tables.chMDB <- function(x, tables, checkTables=TRUE){
+filter_with_tables.chMDB <- function(x, tables, checkTables=TRUE, by=10^5, ...){
    
    ## Check the tables ----
    if(checkTables){
@@ -1060,7 +1396,7 @@ filter_with_tables.chMDB <- function(x, tables, checkTables=TRUE){
    fk <- ReDaMoR::get_foreign_keys(dm)
    
    ## Filter by contamination ----
-   tables <- .ch_filtByConta(tables, x, fk)
+   tables <- .ch_filtByConta(tables, x, fk, by=by)
    dm <- dm[names(tables), rmForeignKeys=TRUE]
    tables <- .norm_data(tables,  dm)
    
@@ -1075,27 +1411,599 @@ filter_with_tables.chMDB <- function(x, tables, checkTables=TRUE){
       dataTables=tables,
       dataModel=dm,
       dbInfo=db_info(x),
-      collectionMembers=cm
+      collectionMembers=cm,
+      check=FALSE
    ))
    
 }
 
 
 ###############################################################################@
-## Helpers ----
-.write_chTables.chMDB <- function(x, con, dbName, by=10^5){
-   dm <- data_model(x)
-   df <- data_files(x)
-   rp <- df$readParameters
-   df <- df$dataFiles
-   for(tn in names(x)){
-      toWrite <- data_tables(x, dplyr::all_of(tn), skip=0, n_max=by)[[1]]
-      r <- nrow(toWrite)
-      while(nrow(toWrite)>0){
-         ch_insert(con=con, dbName=dbName, tableName=tn, value=toWrite)
-         toWrite <- data_tables(x, dplyr::all_of(tn), skip=r, n_max=by)[[1]]
-         r <- r+nrow(toWrite)
+#' 
+#' @rdname filter_mdb_matrix
+#' @method filter_mdb_matrix chMDB
+#' 
+#' @export
+#'
+filter_mdb_matrix.chMDB <- function(x, tableName, ...){
+   
+   ## Checks ----
+   stopifnot(
+      is.chMDB(x),
+      tableName %in% names(x)
+   )
+   tableModel <- data_model(x)[[tableName]]
+   stopifnot(ReDaMoR::is.MatrixModel(tableModel))
+   iFilter <- list(...)
+   stopifnot(
+      length(names(iFilter)) > 0, length(iFilter) <= 2, 
+      !any(duplicated(names(iFilter))),
+      all(names(iFilter) %in% tableModel$fields$name)
+   )
+   vfield <- tableModel$fields %>%
+      dplyr::filter(!.data$type %in% c("row", "column")) %>% 
+      dplyr::pull("name") %>% 
+      intersect(names(iFilter))
+   if(length(vfield)>0){
+      stop("Cannot filter a matrix on values; only on row or column names")
+   }
+   
+   ## Table info ----
+   dbti <- db_tables(x)$dbTables[tableName]
+   dbn <- sub("^`", "", sub("`[.]`.*$", "", dbti))
+   vtype <- setdiff(
+      tableModel$fields$type,
+      c("row", "column")
+   )
+   mtables <- get_query(
+      x,
+      sprintf("SELECT * FROM %s", dbti),
+      autoalias=FALSE
+   )$table
+   dimcol <- get_query(
+      x,
+      sprintf(
+         paste(
+            "SELECT name FROM system.columns",
+            " WHERE database='%s' AND table='%s'"
+         ),
+         dbn, mtables[1]
+      ),
+      autoalias=FALSE
+   )
+   dimcol <- intersect(
+      dimcol$name, c("___COLNAMES___", "___ROWNAMES___")
+   )
+   stopifnot(length(dimcol)==1)
+   chFields <- get_query(
+      x,
+      sprintf(
+         paste(
+            "SELECT database, table, name FROM system.columns",
+            " WHERE database='%s' AND table IN ('%s')"
+         ),
+         dbn,
+         paste(unique(mtables), collapse="', '")
+      ),
+      autoalias=FALSE
+   ) %>% 
+      dplyr::filter(.data$name!=dimcol) %>% 
+      dplyr::arrange(.data$name)
+   
+   ## Create clause and selected fields ----
+   clause <- ""
+   sel <- NA
+   frc <- c()
+   for(f in names(iFilter)){
+      ft <- tableModel$fields %>%
+         dplyr::filter(.data$name==!!f) %>%
+         dplyr::pull("type")
+      if(ft=="row"){
+         fr <- iFilter[[f]]
+         frc <- c(frc, "r")
+         if(dimcol=="___ROWNAMES___"){
+            clause <- sprintf(
+               "WHERE `___ROWNAMES___` IN ('%s')",
+               paste(iFilter[[f]],  collapse="', '")
+            )
+         }else{
+            sel <- iFilter[[f]]
+         }
       }
+      if(ft=="column"){
+         fc <- iFilter[[f]]
+         frc <- c(frc, "c")
+         if(dimcol=="___COLNAMES___"){
+            clause <- sprintf(
+               "WHERE `___COLNAMES___` IN ('%s')",
+               paste(iFilter[[f]],  collapse="', '")
+            )
+         }else{
+            sel <- iFilter[[f]]
+         }
+      }
+   }
+   frc <- paste(sort(frc), collapse="")
+   queryTemplate <- sprintf(
+      "SELECT %s FROM `%s`.`%s`",
+      "%s", dbn, "%s"
+   )
+   
+   ## Build the query ----
+   i <- 1
+   if(is.na(sel[1])){
+      tquery <- paste(
+         sprintf(
+            queryTemplate, "*", mtables[[i]]
+         ),
+         clause
+      )
+   }else{
+      totake <- chFields %>%
+         dplyr::filter(.data$table==!!mtables[[i]]) %>%
+         dplyr::pull("name") %>% 
+         intersect(sel)
+      totake <- c(dimcol, totake) %>% 
+         paste(collapse="`, `")
+      totake <- paste0("`", totake, "`")
+      tquery <- paste(
+         sprintf(
+            queryTemplate,
+            totake,
+            mtables[[i]]
+         ),
+         clause
+      )
+   }
+   query <- tquery
+   if(length(mtables)>1) for(i in 2:length(mtables)){
+      if(is.na(sel[1])){
+         tquery <- paste(
+            sprintf(
+               queryTemplate, "*", mtables[[i]]
+            ),
+            clause
+         )
+      }else{
+         totake <- chFields %>%
+            dplyr::filter(.data$table==!!mtables[[i]]) %>%
+            dplyr::pull("name") %>% 
+            intersect(sel)
+         totake <- c(dimcol, totake) %>% 
+            paste(collapse="`, `")
+         totake <- paste0("`", totake, "`")
+         tquery <- paste(
+            sprintf(
+               queryTemplate,
+               totake,
+               mtables[[i]]
+            ),
+            clause
+         )
+      }
+      query <- paste0(
+         "SELECT * FROM (",
+         query,
+         ") FULL JOIN (",
+         tquery,
+         ') USING `',
+         dimcol,
+         '`'
+      )
+   }
+
+   ## Get the results ----
+   toRet <- get_query(x, query, autoalias=FALSE)
+   dimname <- toRet[[dimcol]]
+   toRet <- toRet[, -which(colnames(toRet)==dimcol), drop=FALSE] %>% 
+      as.matrix() %>% 
+      magrittr::set_rownames(dimname) %>%
+      magrittr::set_class(vtype)
+   if(frc=="r"){
+      toRet <- toRet[intersect(fr, rownames(toRet)),, drop=FALSE]
+   }
+   if(frc=="c"){
+      toRet <- toRet[,intersect(fc, colnames(toRet)), drop=FALSE]
+   }
+   if(frc=="cr"){
+      toRet <- toRet[
+         intersect(fr, rownames(toRet)),
+         intersect(fc, colnames(toRet)),
+         drop=FALSE
+      ]
+   }
+   return(toRet)
+   
+}
+
+
+###############################################################################@
+## Helpers ----
+.write_chTables.chMDB <- function(x, con, dbName, by=10^5, ...){
+   dm <- data_model(x)
+   for(tn in names(x)){
+      if(ReDaMoR::is.MatrixModel(dm[[tn]])){
+         nullable <- dm[[tn]]$fields %>% 
+            dplyr::filter(!.data$type %in% c("column", "row")) %>% 
+            dplyr::pull("nullable")
+         vtype <- setdiff(dm[[tn]]$fields$type, c("column", "row"))
+         tnpath <- db_tables(x)$dbTables[[tn]]
+         tndb <- sub("^`", "", sub("`[.]`.*$", "", tnpath))
+         stl <- get_query(
+            x,
+            sprintf(
+               "SELECT * FROM %s",
+               tnpath
+            ),
+            autoalias=FALSE
+         )
+         ch_insert(con=con, dbName=dbName, tableName=tn, value=stl)
+         for(stn in stl$table){
+            toWrite <- get_query(
+               x,
+               sprintf("SELECT * FROM `%s`.`%s` LIMIT 0, %s", tndb, stn, by),
+               autoalias=FALSE
+            )
+            nulcol <- NULL
+            if(nullable){
+               nulcol <- colnames(toWrite)[-1]
+            }
+            write_MergeTree(
+               con=con,
+               dbName=dbName,
+               tableName=stn,
+               value=toWrite,
+               rtypes=c("character", rep(vtype, ncol(toWrite)-1)) %>% 
+                  magrittr::set_names(colnames(toWrite)),
+               nullable=nulcol,
+               sortKey=colnames(toWrite)[1]
+            )
+            r <- nrow(toWrite)
+            toWrite <- get_query(
+               x,
+               sprintf(
+                  "SELECT * FROM `%s`.`%s` LIMIT %s, %s",
+                  tndb, stn, r, by
+               ),
+               autoalias=FALSE
+            )
+            while(nrow(toWrite)>0){
+               ch_insert(con=con, dbName=dbName, tableName=stn, value=toWrite)
+               r <- r + nrow(toWrite)
+               toWrite <- get_query(
+                  x,
+                  sprintf(
+                     "SELECT * FROM `%s`.`%s` LIMIT %s, %s",
+                     tndb, stn, r, by
+                  ),
+                  autoalias=FALSE
+               )
+            }
+         }
+      }else{
+         toWrite <- data_tables(x, dplyr::all_of(tn), skip=0, n_max=by)[[1]]
+         r <- nrow(toWrite)
+         while(nrow(toWrite)>0){
+            ch_insert(con=con, dbName=dbName, tableName=tn, value=toWrite)
+            toWrite <- data_tables(x, dplyr::all_of(tn), skip=r, n_max=by)[[1]]
+            r <- r + nrow(toWrite)
+         }
+      }
+   }
+}
+
+.get_ch_mtable <- function(
+   x,
+   tablePath,
+   tableModel,
+   skip=0, n_max=Inf
+){
+   
+   if(is.infinite(n_max)){
+      n_max <- "18446744073709551615"
+   }
+   dbti <- tablePath
+   tdb <- sub("^`", "", sub("`[.]`.*$", "", dbti))
+   if(ReDaMoR::is.MatrixModel(tableModel)){
+      query <- "SELECT * FROM %s"
+      tquery <- sprintf(query, dbti)
+      qr <- get_query(x, tquery, autoalias=FALSE)
+      toRet <- list()
+      vtype <- setdiff(
+         tableModel$fields$type,
+         c("row", "column")
+      )
+      dimcol <- get_query(
+         x,
+         sprintf(
+            paste(
+               "SELECT name FROM system.columns",
+               " WHERE database='%s' AND table='%s'"
+            ),
+            tdb, qr$table[1]
+         ),
+         autoalias=FALSE
+      )
+      dimcol <- intersect(
+         dimcol$name, c("___COLNAMES___", "___ROWNAMES___")
+      )
+      stopifnot(length(dimcol)==1)
+      chFields <- get_query(
+         x,
+         sprintf(
+            paste(
+               "SELECT database, table, name FROM system.columns",
+               " WHERE database='%s' AND table IN ('%s')"
+            ),
+            tdb,
+            paste(unique(qr$table), collapse="', '")
+         ),
+         autoalias=FALSE
+      ) %>% 
+         dplyr::filter(.data$name!=dimcol) %>% 
+         dplyr::arrange(.data$name)
+      if(dimcol=="___ROWNAMES___"){
+         for(st in unique(chFields$table)){
+            stquery <- sprintf(
+               paste(query, 'ORDER BY %s'),
+               sprintf('`%s`.`%s`', tdb, st),
+               dimcol
+            )
+            stquery <- paste(
+               stquery,
+               sprintf("LIMIT %s, %s", skip, n_max)
+            )
+            stqr <- get_query(x, stquery, autoalias=FALSE)
+            dimname <- stqr[[dimcol]]
+            stopifnot(
+               !any(duplicated(dimname)),
+               ncol(stqr) > 1
+            )
+            toAdd <- stqr[, -1, drop=FALSE] %>% 
+               as.matrix() %>% 
+               magrittr::set_rownames(dimname)
+            toRet <- c(toRet, list(toAdd))
+         }
+         toRet <- do.call(cbind, toRet) %>%
+            magrittr::set_class(vtype)
+         toRet <- toRet[, sort(colnames(toRet))]
+      }else{
+         if(skip >= nrow(chFields)){
+            return(NULL)
+         }
+         chFields <- chFields[(skip + 1):nrow(chFields),]
+         chFields <- chFields[1:min(nrow(chFields), n_max),]
+         for(st in unique(chFields$table)){
+            stquery <- sprintf(
+               'SELECT `%s` FROM %s ORDER BY %s',
+               paste(
+                  c(
+                     dimcol,
+                     chFields$name[which(chFields$table==st)]
+                  ),
+                  collapse='`, `'
+               ),
+               sprintf('`%s`.`%s`', tdb, st),
+               dimcol
+            )
+            stqr <- get_query(x, stquery, autoalias=FALSE)
+            dimname <- stqr[[dimcol]]
+            stopifnot(
+               !any(duplicated(dimname)),
+               ncol(stqr) > 1
+            )
+            toAdd <- stqr[, -1, drop=FALSE] %>% 
+               as.matrix() %>% 
+               magrittr::set_rownames(dimname)
+            toRet <- c(toRet, list(toAdd))
+         }
+         toRet <- do.call(cbind, toRet) %>%
+            t() %>%
+            magrittr::set_class(vtype)
+         toRet <- toRet[sort(rownames(toRet)),]
+      }
+   }else{
+      query <- "SELECT * FROM %s ORDER BY %s LIMIT %s, %s"
+      toRet <- get_query(
+         x,
+         sprintf(
+            query,
+            tablePath,
+            .get_tm_sortKey(tableModel, quoted=TRUE),
+            skip, n_max
+         ),
+         autoalias=FALSE
+      )
+      attr(toRet, "data.type") <- NULL
+      for (cn in colnames(toRet)) {
+         toRet[, cn] <- ReDaMoR::as_type(
+            dplyr::pull(toRet, !!cn),
+            dplyr::filter(tableModel$fields, .data$name==!!cn) %>%
+               dplyr::pull("type")
+         )
+      }
+   }
+   return(toRet)
+}
+
+.dim_ch_mtable <- function(x, tablePath, tableModel){
+   
+   tp <- gsub("`", "", strsplit(tablePath, split="`[.]`")[[1]])
+   tdb <- tp[1]
+   tn <- tp[2]
+   chTables <- list_tables(
+      unclass(x)$tkcon$chcon, dbNames=tdb
+   )
+   chFields <- get_query(
+      x,
+      sprintf(
+         paste(
+            "SELECT database, table, name FROM system.columns",
+            " WHERE database='%s'"
+         ),
+         tdb
+      ),
+      autoalias=FALSE
+   )
+   
+   if(ReDaMoR::is.MatrixModel(tableModel)){
+      dbmt <- tablePath
+      query <- "SELECT * FROM %s"
+      tquery <- sprintf(query, dbmt)
+      qr <- get_query(x, tquery, autoalias=FALSE)
+      nr <- chTables %>% 
+         dplyr::filter(
+            .data$database==tdb & .data$name==qr$table[1]
+         ) %>% 
+         dplyr::pull("total_rows")
+      tfields <- chFields %>% 
+         dplyr::filter(
+            .data$database==tdb,
+            .data$table %in% qr$table
+         )
+      if("___ROWNAMES___" %in% tfields$name){
+         if("___COLNAMES___" %in% tfields$name){
+            stop(paste0(tn, ": Ambiguous matrix format"))
+         }else{
+            transposed=FALSE
+         }
+      }else{
+         if("___COLNAMES___" %in% tfields$name){
+            transposed=TRUE
+         }else{
+            stop(paste0(tn, ": Wrong matrix format"))
+         }
+      }
+      nc <- nrow(tfields) - nrow(qr)
+      
+      toRet <- dplyr::tibble(
+         format="matrix",
+         ncol=ifelse(transposed, nr, nc),
+         nrow=ifelse(transposed, nc, nr),
+         records=nc*nr,
+         transposed=transposed
+      )
+      
+   }else{
+      
+      toRet <- dplyr::tibble(
+         format="table",
+         ncol=length(tableModel),
+         nrow=dplyr::filter(
+            chTables,
+            .data$database==tdb,
+            .data$name==tn
+         ) %>% dplyr::pull("total_rows")
+      ) %>%
+         dplyr::mutate(
+            records=.data$nrow,
+            transposed=FALSE
+         )
+   }
+   
+   return(toRet)
+
+}
+
+.head_ch_mtable <- function(
+   x,
+   tablePath,
+   tableModel,
+   n=6L
+){
+   if(ReDaMoR::is.MatrixModel(tableModel)){
+      dd <- .dim_ch_mtable(x, tablePath, tableModel)
+      
+      if(is.infinite(n)){
+         nc <- dd$ncol
+         nr <- dd$nrow
+      }else{
+         ncol <- dd$ncol
+         mn <- min(floor(sqrt(n)), ncol)
+         for(nc in mn:floor(mn/2)){
+            if(n %% nc == 0){
+               break()
+            }
+         }
+         if(n %% nc == 0){
+            nr <- n %/% nc
+         }else{
+            nr <- nc <- mn
+         }
+         if(nc * nr != n){
+            warning(sprintf("Returning %s records", nc * nr))
+         }
+      }
+      
+      dbti <- tablePath
+      query <- "SELECT * FROM %s"
+      tdb <- sub("^`", "", sub("`[.]`.*$", "", dbti))
+      tquery <- sprintf(query, dbti)
+      qr <- get_query(x, tquery, autoalias=FALSE)
+      vtype <- setdiff(
+         tableModel$fields$type,
+         c("row", "column")
+      )
+      dimcol <- ifelse(dd$transposed, "___COLNAMES___", "___ROWNAMES___")
+      chFields <- get_query(
+         x,
+         sprintf(
+            paste(
+               "SELECT database, table, name FROM system.columns",
+               " WHERE database='%s' AND table IN ('%s')"
+            ),
+            tdb,
+            paste(unique(qr$table), collapse="', '")
+         ),
+         autoalias=FALSE
+      ) %>% 
+         dplyr::filter(.data$name!=dimcol) %>% 
+         dplyr::arrange(.data$name)
+      if(!dd$transposed){
+         chFields <- chFields[1:nc,]
+         lim <- nr
+      }else{
+         chFields <- chFields[1:nr,]
+         lim <- nc
+      }
+      toRet <- c()
+      for(st in unique(chFields$table)){
+         stquery <- sprintf(
+            'SELECT `%s` FROM %s ORDER BY %s LIMIT %s',
+            paste(
+               c(
+                  dimcol,
+                  chFields$name[which(chFields$table==st)]
+               ),
+               collapse='`, `'
+            ),
+            sprintf('`%s`.`%s`', tdb, st),
+            dimcol,
+            lim
+         )
+         stqr <- get_query(x, stquery, autoalias=FALSE)
+         dimname <- stqr[[dimcol]]
+         stopifnot(
+            !any(duplicated(dimname)),
+            ncol(stqr) > 1
+         )
+         toAdd <- stqr[, -1, drop=FALSE] %>% 
+            as.matrix() %>% 
+            magrittr::set_class(vtype) %>% 
+            magrittr::set_rownames(dimname)
+         toRet <- cbind(toRet, toAdd)
+      }
+      
+      if(!dd$transposed){
+         return(toRet[, sort(colnames(toRet))])
+      }else{
+         return(t(toRet[, sort(colnames(toRet))]))
+      }
+      
+   }else{
+      return(.get_ch_mtable(
+         x, tablePath=tablePath, tableModel=tableModel, n_max=n
+      ))
    }
 }
 
@@ -1108,22 +2016,27 @@ filter_with_tables.chMDB <- function(x, tables, checkTables=TRUE){
       fkf <- fk %>% dplyr::filter(.data$from==!!tn & .data$fmin>0)
       fkt <- fk %>% dplyr::filter(.data$to==!!tn & .data$tmin>0)
       nfk <<- nfk %>%
-         dplyr::anti_join(select(fkf, "from", "to"), by=c("from", "to")) %>% 
-         dplyr::anti_join(select(fkt, "from", "to"), by=c("from", "to"))
+         dplyr::anti_join(
+            dplyr::select(fkf, "from", "to"), by=c("from", "to")
+         ) %>% 
+         dplyr::anti_join(
+            dplyr::select(fkt, "from", "to"), by=c("from", "to")
+         )
       fkl <- dplyr::bind_rows(
          fkf,
          fkt %>% dplyr::rename("from"="to", "ff"="tf", "to"="from", "tf"="ff")
       ) %>% 
-         distinct()
+         dplyr::distinct()
       if(nrow(fkl)>0){
          for(i in 1:nrow(fkl)){
             ntn <- fkl$to[i]
             if(ntn %in% names(d)){
-               nv <- dplyr::semi_join(
-                  d[[ntn]], d[[tn]],
+               nv <- .mdjoin(
+                  d1=d[[ntn]], d2=d[[tn]],
                   by=magrittr::set_names(
                      fkl$ff[[i]], fkl$tf[[i]]
-                  )
+                  ),
+                  tm1=dm[[ntn]], tm2=dm[[tn]]
                )
             }else{
                nv <- c()
@@ -1132,13 +2045,14 @@ filter_with_tables.chMDB <- function(x, tables, checkTables=TRUE){
                )[[1]]
                r <- nrow(toAdd)
                while(nrow(toAdd)>0){
-                  toAdd <- dplyr::semi_join(
-                     toAdd, d[[tn]],
+                  toAdd <- .mdjoin(
+                     d1=toAdd, d2=d[[tn]],
                      by=magrittr::set_names(
                         fkl$ff[[i]], fkl$tf[[i]]
-                     )
+                     ),
+                     tm1=dm[[ntn]], tm2=dm[[tn]]
                   )
-                  nv <- dplyr::bind_rows(nv, toAdd)
+                  nv <- rbind(nv, toAdd)
                   toAdd <- data_tables(
                      fdb, dplyr::all_of(ntn), skip=r, n_max=by
                   )[[1]]
@@ -1153,13 +2067,15 @@ filter_with_tables.chMDB <- function(x, tables, checkTables=TRUE){
       fkf <- fk %>% dplyr::filter(.data$from==!!tn & .data$fmin==0)
       fkt <- fk %>% dplyr::filter(.data$to==!!tn & .data$tmin==0)
       nfk <<- nfk %>%
-         dplyr::anti_join(select(fkf, "from", "to"), by=c("from", "to")) %>% 
-         dplyr::anti_join(select(fkt, "from", "to"), by=c("from", "to"))
+         dplyr::anti_join(
+            dplyr::select(fkf, "from", "to"), by=c("from", "to")
+         ) %>% 
+         dplyr::anti_join(dplyr::select(fkt, "from", "to"), by=c("from", "to"))
       fkl <- dplyr::bind_rows(
          fkf,
          fkt %>% dplyr::rename("from"="to", "ff"="tf", "to"="from", "tf"="ff")
       ) %>% 
-         distinct()
+         dplyr::distinct()
       if(nrow(fkl)>0){
          for(i in 1:nrow(fkl)){
             ntn <- fkl$to[i]
@@ -1169,19 +2085,20 @@ filter_with_tables.chMDB <- function(x, tables, checkTables=TRUE){
             )[[1]]
             r <- nrow(toAdd)
             while(nrow(toAdd)>0){
-               toAdd <- dplyr::semi_join(
-                  toAdd, d[[tn]],
+               toAdd <- .mdjoin(
+                  d1=toAdd, d2=d[[tn]],
                   by=magrittr::set_names(
                      fkl$ff[[i]], fkl$tf[[i]]
-                  )
+                  ),
+                  tm1=dm[[ntn]], tm2=dm[[tn]]
                )
-               vta <- dplyr::bind_rows(vta, toAdd)
+               vta <- rbind(vta, toAdd)
                toAdd <- data_tables(
                   fdb, dplyr::all_of(ntn), skip=r, n_max=by
                )[[1]]
                r <- r + nrow(toAdd)
             }
-            d[[ntn]] <<- dplyr::bind_rows(
+            d[[ntn]] <<- rbind(
                d[[ntn]],
                vta
             ) %>%

@@ -10,9 +10,17 @@ db_disconnect.ClickhouseConnection <- function(x){
 
 ###############################################################################@
 #'
+#' @rdname db_reconnect
+#' @method db_reconnect ClickhouseConnection
+#' 
+#' @param settings list of
+#' [Clickhouse settings](https://clickhouse.com/docs/en/operations/settings/settings/)
+#'
 #' @export
 #'
-db_reconnect.ClickhouseConnection <- function(x, user, password, ntries=3){
+db_reconnect.ClickhouseConnection <- function(
+   x, user, password, ntries=3, settings=list(), ...
+){
    xn <- deparse(substitute(x))
    if(missing(user)){
       user <- x@user
@@ -52,7 +60,22 @@ db_reconnect.ClickhouseConnection <- function(x, user, password, ntries=3){
          user=user, password=password
       )
    }
+   for(s in names(settings)){
+      RClickhouse::dbSendQuery(nv, sprintf("SET %s='%s'", s, settings[[s]]))
+   }
    assign(xn, nv, envir=parent.frame(n=1))
+}
+
+
+###############################################################################@
+#' 
+#' @rdname get_hosts
+#' @method get_hosts ClickhouseConnection
+#' 
+#' @export
+#'
+get_hosts.ClickhouseConnection <- function(x, ...){
+   paste(x@host, x@port, sep=":")
 }
 
 
@@ -88,7 +111,7 @@ list_tables <- function(
       )
    }
    toRet <- dplyr::as_tibble(DBI::dbGetQuery(con, query)) %>% 
-      mutate(
+      dplyr::mutate(
          total_rows=as.numeric(.data$total_rows),
          total_bytes=as.numeric(.data$total_bytes)
       )
@@ -98,7 +121,7 @@ list_tables <- function(
 
 ###############################################################################@
 #' Write a Clickhouse
-#' [MergeTree](https://clickhouse.tech/docs/en/engines/table-engines/mergetree-family/mergetree/)
+#' [MergeTree](https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree/)
 #' table
 #' 
 #' @param con the clickhouse connection
@@ -138,7 +161,7 @@ write_MergeTree <- function(
    if(is.null(rtypes)){
       rtypes <- c()
       for(cn in colnames(value)){
-         rtypes[cn] <- class(pull(value, !!cn))[1]
+         rtypes[cn] <- class(dplyr::pull(value, !!cn))[1]
       }
    }
    stopifnot(
@@ -164,7 +187,7 @@ write_MergeTree <- function(
                "`%s` %s",
                cn,
                ifelse(
-                  cn %in% nullable,
+                  cn %in% nullable & chtypes[cn]!="Array(String)",
                   sprintf("Nullable(%s)", chtypes[cn]),
                   chtypes[cn]
                )
@@ -181,6 +204,11 @@ write_MergeTree <- function(
             "ORDER BY (`%s`)",
             paste(sortKey, collapse="`, `")
          )
+      )
+   }else{
+      tst <- paste(
+         tst,
+         "ORDER BY tuple()"
       )
    }
    
@@ -231,8 +259,10 @@ ch_insert <- function(
    on.exit(RClickhouse::dbSendQuery(con, "USE default"))
    
    if(nrow(value)>0){
-      fo <- DBI::dbGetQuery(con, sprintf("SELECT * FROM %s LIMIT 1", qname)) %>% 
-         colnames
+      fo <- DBI::dbGetQuery(
+         con, sprintf("SELECT * FROM %s LIMIT 1", qname)
+      ) %>% 
+         colnames()
       if(!all(colnames(value) %in% fo)){
          stop(
             "Some fields in value are not available in the table: ",
@@ -247,11 +277,12 @@ ch_insert <- function(
       e <- e[which(!duplicated(e))]
       for(i in 1:length(s)){
          em <- try(
-            DBI::dbWriteTable(
-               con,
-               tableName, #qname,
-               dplyr::slice(value, s[i]:e[i]),
-               append=TRUE
+            DBI::dbAppendTable(
+               conn=con,
+               name=tableName, #qname,
+               value=dplyr::slice(value, s[i]:e[i]),
+               row.names=FALSE
+               # append=TRUE
             ),
             silent=TRUE
          )
@@ -309,25 +340,39 @@ mergeTree_from_RelTableModel <- function(
       is.character(dbName), length(dbName)==1, !is.na(dbName),
       ReDaMoR::is.RelTableModel(tm)
    )
-   rtypes <- tm$fields$type
-   names(rtypes) <- tm$fields$name
-   value <- dplyr::tibble()
-   for(i in 1:nrow(tm$fields)){
-      toAdd <- integer()
-      class(toAdd) <- tm$fields$type[i]
-      value[,tm$fields$name[i]] <- toAdd
+   if(ReDaMoR::is.MatrixModel(tm)){
+      write_MergeTree(
+         con=con,
+         dbName=dbName,
+         tableName=tm$tableName,
+         value=dplyr::tibble(
+            table=character()
+         ),
+         rtypes=c("table"="character"),
+         nullable=NULL,
+         sortKey="table"
+      )
+   }else{
+      rtypes <- tm$fields$type
+      names(rtypes) <- tm$fields$name
+      value <- dplyr::tibble()
+      for(i in 1:nrow(tm$fields)){
+         toAdd <- integer()
+         class(toAdd) <- tm$fields$type[i]
+         value[,tm$fields$name[i]] <- toAdd
+      }
+      write_MergeTree(
+         con=con,
+         dbName=dbName,
+         tableName=tm$tableName,
+         value=value,
+         rtypes=rtypes,
+         nullable=tm$fields %>%
+            dplyr::filter(.data$nullable) %>%
+            dplyr::pull("name"),
+         sortKey=.get_tm_sortKey(tm)
+      ) 
    }
-   write_MergeTree(
-      con=con,
-      dbName=dbName,
-      tableName=tm$tableName,
-      value=value,
-      rtypes=rtypes,
-      nullable=tm$fields %>%
-         dplyr::filter(.data$nullable) %>%
-         pull("name"),
-      sortKey=.get_tm_sortKey(tm)
-   )
    invisible()
 }
 
@@ -337,22 +382,21 @@ mergeTree_from_RelTableModel <- function(
 
 .get_tm_sortKey <- function(
    tm, # a [ReDaMoR::RelTableModel] object
-   quoted=FALSE # if TRUE, returns a single character value ClickHouse compatible
-               # if FALSE, returns a vector of character
+   quoted=FALSE # if TRUE, returns a single character value CH compatible
+                # if FALSE, returns a vector of character
 ){
    # By default: sort by primary key
    if(length(tm$primaryKey)>0){
       toRet <- tm$primaryKey
-      
    }else{
-      it <- index_table(tm)
+      it <- ReDaMoR::index_table(tm)
       if(!is.null(it) && nrow(it)>0){
          uit <- dplyr::filter(it, .data$uniqueIndex)
          
          # If no primary key, sort by the first unique index
          if(nrow(uit)>0){
             toRet <- dplyr::filter(uit, .data$index==min(uit$index)) %>% 
-               pull("field")
+               dplyr::pull("field")
          }else{
             
             # If no unique index, sort by index and the remaining columns
@@ -388,3 +432,11 @@ CH_RESERVED_DB <- c(
    "system",
    "_temporary_and_external_tables"
 )
+
+###############################################################################@
+## Maximum number of column allowed in a ClikHouse table ----
+CH_MAX_COL <- 1000
+
+###############################################################################@
+## Maximum length of base64 data ----
+CH_DOC_CHUNK <- 10^6

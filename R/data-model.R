@@ -12,3 +12,8 @@ CHMDB_DATA_MODEL <- ReDaMoR::read_json_data_model(
       package="TKCat"
    )
 )
+
+MGT_TABLES <- c(
+   "___Timestamps___",
+   "___Public___", "___MDBUsers___"
+)

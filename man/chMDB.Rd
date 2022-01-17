@@ -6,7 +6,6 @@
 \alias{rename.chMDB}
 \alias{[.chMDB}
 \alias{[[.chMDB}
-\alias{c.chMDB}
 \title{An \link{MDB} (Modeled DataBase) relying on ClickHouse: chMDB}
 \usage{
 chMDB(
@@ -15,6 +14,7 @@ chMDB(
   dbInfo,
   dataModel,
   collectionMembers = NULL,
+  check = TRUE,
   n_max = 10,
   verbose = FALSE
 )
@@ -26,8 +26,6 @@ chMDB(
 \method{[}{chMDB}(x, i)
 
 \method{[[}{chMDB}(x, i)
-
-\method{c}{chMDB}(...)
 }
 \arguments{
 \item{tkcon}{a \link{chTKCat} object}
@@ -44,6 +42,9 @@ chMDB(
 \item{collectionMembers}{the members of collections as provided to the
 \link{collection_members<-} function (default: NULL ==> no member).}
 
+\item{check}{logical: if TRUE (default) the data are confronted to the
+data model}
+
 \item{n_max}{maximum number of records to read
 for checks purpose (default: 10). If 0, the data are not checked.
 See also \code{\link[ReDaMoR:confront_data]{ReDaMoR::confront_data()}}.}
@@ -56,7 +57,7 @@ See also \code{\link[ReDaMoR:confront_data]{ReDaMoR::confront_data()}}.}
 
 \item{.data}{a \link{chMDB} object}
 
-\item{...}{\link{chMDB} objects}
+\item{...}{Use new_name = old_name to rename selected tables}
 
 \item{i}{the index or the name of the tables to take}
 }
@@ -72,7 +73,7 @@ Rename tables of a \link{chMDB} object
 \itemize{
 \item MDB methods:
 \link{db_info}, \link{data_model}, \link{data_tables}, \link{collection_members},
-\link{count_records}, \link{filter_with_tables}, \link{as_fileMDB}
+\link{count_records}, \link{dims}, \link{filter_with_tables}, \link{as_fileMDB}
 \item Additional general documentation is related to \link{MDB}.
 \item \link{filter.chMDB}, \link{slice.chMDB}
 \item \link{chTKCat}, \code{\link[=db_disconnect]{db_disconnect()}}, \code{\link[=db_reconnect]{db_reconnect()}}

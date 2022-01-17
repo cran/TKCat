@@ -2,9 +2,27 @@
 ## UI Helpers ####
 ###############################################################################@
 
+TKCAT_LOGO_DIV <- shiny::div(
+   shiny::a(
+      shiny::img(
+         src="www/TKCat-small.png",
+         height="120px",
+         id="mainLogo"
+      ),
+      href="https://github.com/patzaw/TKCat",
+      target="_blank"
+   ),
+   style=paste(
+      "width:150px;",
+      "margin-left:auto; margin-right:auto;",
+      "margin-top:15px;",
+      "margin-bottom:15px;",
+      "text-align:center;"
+   )
+)
 
 ###############################################################################@
-.etkc_add_resources <- function(ddir=NULL){
+.etkc_add_resources <- function(ddir=NULL, rDirs=NULL){
    pckn <- utils::packageName()
    shiny::addResourcePath(
       "www",
@@ -18,6 +36,12 @@
       shiny::addResourcePath(
          "data",
          ddir
+      )
+   }
+   if(length(rDirs)>0) for(i in 1:length(rDirs)){
+      shiny::addResourcePath(
+         names(rDirs)[i],
+         as.character(rDirs[i])
       )
    }
    return(invisible(NULL))
@@ -48,7 +72,9 @@
 ###############################################################################@
 .etkc_sd_sidebar <- function(
    sysInterface,
-   manList
+   userManager=FALSE,
+   manList,
+   logoDiv=TKCAT_LOGO_DIV
 ){
    
    ## Resources ----
@@ -90,6 +116,15 @@
             icon=NULL
          )
       ))
+      if(userManager){
+         sbelts <- c(sbelts, list(
+            shinydashboard::menuItem(
+               shiny::uiOutput("userManager"),
+               tabName="userManagerTab",
+               icon=NULL
+            )
+         ))
+      }
    }
    
    ## Documentation ----
@@ -117,24 +152,7 @@
    
    return(shinydashboard::dashboardSidebar(
       ## Logo ----
-      div(
-         shiny::a(
-            shiny::img(
-               src="www/TKCat-small.png",
-               height="120px",
-               id="mainLogo"
-            ),
-            href="https://github.com/patzaw/TKCat",
-            target="_blank"
-         ),
-         style=paste(
-            "width:150px;",
-            "margin-left:auto; margin-right:auto;",
-            "margin-top:15px;",
-            "margin-bottom:15px;",
-            "text-align:center;"
-         )
-      ),
+      logoDiv,
       shiny::tags$hr(),
       ## Menu ----
       do.call(shinydashboard::sidebarMenu, sbelts)
@@ -142,7 +160,7 @@
 }
 
 ###############################################################################@
-.etkc_sd_body <- function(sysInterface){
+.etkc_sd_body <- function(sysInterface, tabIcon='www/TKCat-small.png'){
    
    belts <- list(
       
@@ -151,11 +169,11 @@
          tabName="resources",
          shiny::fluidRow(
             shiny::column(
-               6,
+               9,
                DT::DTOutput("mdbList")
             ),
             shiny::column(
-               6,
+               3,
                shiny::uiOutput("dbInfo")
             )
          )
@@ -225,7 +243,7 @@
       shiny::tags$head(
          shiny::tags$link(
             rel="icon",
-            href='www/TKCat-small.png'
+            href=tabIcon
          ),
          shiny::tags$script(src='www/interactions.js')
       ),
@@ -246,23 +264,39 @@
    x,
    subSetSize=100,
    xparams=list(),
-   ddir=NULL
+   ddir=NULL,
+   userManager=NULL,
+   skinColors=c("blue", "yellow"),
+   title=NULL
 ){
    
    function(input, output, session) {
+      
+      
+      ########################@
+      ## TKCat instance ----
+      
+      if(length(title)==1 && !is.na(title)){
+         customTitle <- TRUE
+         output$instance <- shiny::renderUI({
+            title
+         })
+      }else{
+         customTitle <- FALSE
+      }
       
       if(is.TKCat(x)){
          instance <- shiny::reactiveValues(
             tkcat=x
          )
-         output$instance <- shiny::renderUI({
-            "Local TKCat"
-         })
+         if(!customTitle){
+            output$instance <- shiny::renderUI({
+               "Local TKCat"
+            })
+         }
       }
       
       if(is.chTKCat(x)){
-         ########################@
-         ## TKCat instance ----
          instance <- shiny::reactiveValues(
             tkcat=db_reconnect(x, user="default"),
             valid=DBI::dbIsValid(x$chcon)
@@ -275,14 +309,16 @@
                instance$valid <- TRUE
             }
          })
-         output$instance <- shiny::renderUI({
-            paste("chTKCat :", instance$tkcat$instance)
-         })
+         if(!customTitle){
+            output$instance <- shiny::renderUI({
+               paste("chTKCat :", instance$tkcat$instance)
+            })
+         }
          shiny::observe({
             if(instance$tkcat$chcon@user=="default"){
-               sc <- "blue"
+               sc <- skinColors[1]
             }else{
-               sc <- "yellow"
+               sc <- skinColors[2]
             }
             session$sendCustomMessage(
                "change_skin",
@@ -336,9 +372,19 @@
       })
       output$mdbList <- DT::renderDT({
          shiny::req(mdbs$list)
+         colToTake <- intersect(
+            c("name", "title", "access", "maintainer", "timestamp"),
+            colnames(mdbs$list)
+         )
          toShow <- mdbs$list %>%
-            dplyr::select("name", "title") %>%
-            dplyr::rename("Resource"="name", "Title"="title")
+            dplyr::select(dplyr::all_of(colToTake)) %>%
+            dplyr::rename("Resource"="name") %>% 
+            dplyr::rename_all(function(x){
+               paste0(
+                  toupper(substr(x, 1, 1)),
+                  substr(x, 2, nchar(x))
+               )
+            })
          cm <- mdbs$collections %>%
             dplyr::select("collection", "resource") %>%
             dplyr::distinct() %>%
@@ -350,28 +396,45 @@
             dplyr::rename("Collections"="collection")
          toShow <- dplyr::left_join(toShow, cm, by=c("Resource"="resource"))
          mdbs$validInput <- TRUE
-         DT::datatable(
-            toShow,
+         toRet <- DT::datatable(
+            dplyr::mutate(
+               toShow,
+               Title=unlist(lapply(
+                  .data$Title,
+                  shiny::markdown
+               )),
+               Maintainer=unlist(lapply(
+                  .data$Maintainer,
+                  shiny::markdown
+               ))
+            ),
             rownames=FALSE,
             filter="top",
+            escape=FALSE,
             selection = list(
                mode="single",
                selected=which(
                   toShow$Resource==shiny::isolate(selStatus$resource)
                )
             ),
-            extensions='Scroller',
             options = list(
-               deferRender = TRUE,
-               scrollY = "70vh",
-               scroller = TRUE,
-               columnDefs=list(
-                  list(width='60%', targets=1)
-               ),
-               order=list(list(0, 'asc')),
-               dom=c("ti")
+               pageLength=10,
+               dom=c("ltip"),
+               order=list(list(0, 'asc'))
             )
          )
+         if("Access" %in% colnames(toShow)){
+            toRet <- toRet %>% 
+               DT::formatStyle(
+                  1:ncol(toShow), valueColumns="Access",
+                  target="row",
+                  color=DT::styleEqual("none", "red", default="black"),
+                  'font-style'=DT::styleEqual(
+                     "none", "italic", default="normal"
+                  )
+               )
+            }
+         toRet
       })
       mdbListProxy <- DT::dataTableProxy("mdbList")
       
@@ -389,11 +452,11 @@
       shiny::observe({
          n <- selStatus$resource
          shiny::req(n)
-         mdb <- try(get_MDB(instance$tkcat, n, n_max=0), silent=TRUE)
+         mdb <- try(get_MDB(instance$tkcat, n, check=FALSE), silent=TRUE)
          selStatus$mdb <- mdb
          if(
             inherits(mdb, "try-error") ||
-            !all(isolate(selStatus$tables) %in% names(mdb))
+            !all(shiny::isolate(selStatus$tables) %in% names(mdb))
          ){
             selStatus$tables <- NULL
          }
@@ -401,7 +464,7 @@
       shiny::observe({
          mdb <- selStatus$mdb
          shiny::req(mdb)
-         tn <- isolate(selStatus$tables)
+         tn <- shiny::isolate(selStatus$tables)
          if(!all(tn %in% names(mdb))){
             selStatus$tables <- NULL
          }
@@ -414,23 +477,27 @@
          mdb <- selStatus$mdb
          shiny::req(!is.null(mdb))
          if(inherits(mdb, "try-error")){
-            n <- isolate(selStatus$resource)
+            n <- shiny::isolate(selStatus$resource)
             shiny::tagList(
                shiny::tags$p(
-                  "You don't have access to",
-                  shiny::strong(n),
-                  '(You can sign in with different credentials)',
+                  attr(mdb, "condition")$message,
                   style="color:red;"
                )
             )
          }else{
             dbi <- db_info(mdb)
             if(is.fileMDB(mdb)){
-               dbs <- sum(data_file_size(mdb))
+               dbs <- sum(data_file_size(mdb)$size)
                dbi$size <- .format_file_size(dbs)
             }else{
                if(!is.metaMDB(mdb)){
                   dbi$records <- sum(count_records(mdb))
+               }
+            }
+            if(is.chMDB(mdb)){
+               ts <- get_chMDB_timestamps(unclass(mdb)$tkcon, dbi$name)
+               if(!is.null(ts)){
+                  dbi$"other instances"=nrow(ts)-1
                }
             }
             shiny::tagList(
@@ -438,9 +505,9 @@
                do.call(shiny::tags$ul, lapply(
                   setdiff(names(dbi), c("name")),
                   function(n){
-                     if(!is.na(dbi[[n]]) && dbi[[n]]!=""){
+                     if(!is.na(dbi[[n]]) && as.character(dbi[[n]])!=""){
                         if(n=="url"){
-                           vt <- tags$a(
+                           vt <- shiny::tags$a(
                               shiny::HTML(dbi[[n]]),
                               href=dbi[[n]], target="_blank"
                            ) %>% as.character()
@@ -450,7 +517,7 @@
                         }else if(is.numeric(dbi[[n]])){
                            vt <- format(dbi[[n]], big.mark=",")
                         }else{
-                           vt <- dbi[[n]]
+                           vt <- as.character(dbi[[n]])
                         }
                         return(shiny::tags$li(
                            shiny::strong(n), ":",
@@ -469,7 +536,7 @@
          reqDbs <- shiny::reactiveVal(character(0))
          dbdone <- shiny::reactiveVal(character(0))
          
-         output$dbDownload <- renderUI({
+         output$dbDownload <- shiny::renderUI({
             dbdone()
             input$refreshDbdown
             mdb <- selStatus$mdb
@@ -503,9 +570,11 @@
             }
             return(
                shiny::a(
-                  list(icon("download"), sprintf("Download %s", n)),
+                  list(shiny::icon("download"), sprintf("Download %s", n)),
                   id="downloadTable",
-                  class="btn btn-default shiny-download-link shiny-bound-output",
+                  class=paste(
+                     "btn btn-default shiny-download-link shiny-bound-output"
+                  ),
                   href=file.path("data", session$token, fname),
                   target="_blank",
                   download=""
@@ -513,8 +582,8 @@
             )
          })
          
-         observeEvent(input$prepDbdown, {
-            mdb <- isolate(selStatus$mdb)
+         shiny::observeEvent(input$prepDbdown, {
+            mdb <- shiny::isolate(selStatus$mdb)
             shiny::req(mdb)
             n <- shiny::isolate(selStatus$resource)
             fname <- paste0(n, ".zip")
@@ -523,7 +592,7 @@
             tf <- tempfile(tmpdir=tddir, fileext=".zip")
             if(!file.exists(f)){
                if(is.chMDB(mdb)){
-                  p <- isolate(upwd())
+                  p <- shiny::isolate(upwd())
                }
                future::future({
                   if(is.chMDB(mdb)){
@@ -582,7 +651,7 @@
       )
       shiny::observe({
          mdb <- selStatus$mdb
-         if(is.chMDB(mdb)){
+         if(is.MDB(mdb)){
             dbdm$model <- data_model(mdb)
             dbdm$collections <- collection_members(mdb)
          }else{
@@ -598,7 +667,7 @@
          dm <- data_model(mdb)
          dbdm$validInput <- TRUE
          nodesIdSelection <- list(enabled=TRUE, useLabels=FALSE)
-         sel <- isolate(selStatus$tables) %>% 
+         sel <- shiny::isolate(selStatus$tables) %>% 
             intersect(names(mdb))
          if(length(sel)>0){
             nodesIdSelection$selected <- sel
@@ -613,7 +682,7 @@
       shiny::observe({
          shiny::req(dbdm$validInput)
          n <- input$dataModel_selected
-         mdb <- isolate(selStatus$mdb)
+         mdb <- shiny::isolate(selStatus$mdb)
          shiny::req(mdb)
          if(length(n)==0 || n=="" || !all(n %in% names(mdb))){
             selStatus$tables <- NULL
@@ -624,8 +693,8 @@
       
       shiny::observe({
          selTables <- selStatus$tables
-         visNetworkProxy("dataModel") %>%
-            visSelectNodes(selTables)
+         visNetwork::visNetworkProxy("dataModel") %>%
+            visNetwork::visSelectNodes(selTables)
       })
       
       ########################@
@@ -639,9 +708,8 @@
          )
       })
       output$colMembers <- DT::renderDT({
-         mdb <- selStatus$mdb
-         shiny::req(mdb)
-         cm <- collection_members(mdb)
+         cm <- dbdm$collections
+         shiny::req(cm)
          cm %>%
             dplyr::select(
                "collection", "id"="mid",
@@ -665,9 +733,9 @@
       shiny::observe({
          cs <- input$colMembers_rows_selected
          shiny::req(cs)
-         mdb <- isolate(selStatus$mdb)
-         shiny::req(mdb)
-         cmt <- collection_members(mdb) %>%
+         cm <- shiny::isolate(dbdm$collections)
+         shiny::req(cm)
+         cmt <- cm %>% 
             dplyr::slice(cs) %>%
             dplyr::pull(table)
          visNetwork::visNetworkProxy("dataModel") %>%
@@ -676,13 +744,16 @@
       
       ########################@
       ## Table information ----
+      
       output$tableInfo <- shiny::renderUI({
          mdb <- selStatus$mdb
          shiny::req(mdb)
-         sel <- selStatus$tables %>% 
+         sel <- selStatus$tables %>%
             intersect(names(mdb))
          shiny::req(sel)
          shiny::req(length(sel)==1)
+         tss <- tabSubSet()
+         nr <- ifelse(attr(tss, "mat"), nrow(tss)*ncol(tss), nrow(tss))
          shiny::tagList(
             shiny::h3(sel),
             shiny::tags$ul(
@@ -690,8 +761,11 @@
                   shiny::tags$li(
                      shiny::tags$strong("File size"),
                      ":",
-                     .format_file_size(data_file_size(mdb)[sel]),
-                     sprintf("(showing %s records)", nrow(tabSubSet()))
+                     data_file_size(mdb) %>% 
+                        dplyr::filter(table==!!sel) %>% 
+                        dplyr::pull("size") %>% 
+                        .format_file_size(),
+                     sprintf("(showing %s records)", nr)
                   )
                }else{
                   if(!is.metaMDB(mdb)){
@@ -700,18 +774,18 @@
                         ":",
                         count_records(mdb, dplyr::all_of(sel)) %>%
                            format(big.mark=","),
-                        sprintf("(showing %s records)", nrow(tabSubSet()))
+                        sprintf("(showing %s records)", nr)
                      )
                   }
                }
             ),
             DT::DTOutput("dataSample"),
-            shiny::tags$br(),
+            shiny::uiOutput("b64Download"),
             shiny::uiOutput("tableDownload")
          )
       })
       
-      tabSubSet <- reactiveVal(NULL)
+      tabSubSet <- shiny::reactiveVal(NULL)
       shiny::observe({
          tabSubSet(NULL)
          mdb <- selStatus$mdb
@@ -720,11 +794,30 @@
             intersect(names(mdb))
          shiny::req(sel)
          shiny::req(length(sel)==1)
-         toShow <- data_tables(mdb, dplyr::all_of(sel), n_max=subSetSize)[[1]]
-         if(utils::object.size(toShow) > 2^19){
+         tabMod <- data_model(mdb)[[sel]]
+         fields <- tabMod$fields$name
+         b64_fields <- fields[which(tabMod$fields$type=="base64")]
+         if(length(b64_fields)>0){
+            toShow <- heads(mdb, dplyr::all_of(sel), n=1)[[1]]
+            toTake <- ceiling((2^23)/object.size(toShow))
+            if(toTake > 1){
+               toShow <- heads(mdb, dplyr::all_of(sel), n=toTake)[[1]]
+            }
+            tmp <- dplyr::select(
+               toShow,
+               dplyr::all_of(setdiff(
+                  colnames(toShow),
+                  tabMod$fields$name[which(tabMod$fields$type=="base64")]
+               ))
+            )
+         }else{
+            toShow <- tmp <- heads(mdb, dplyr::all_of(sel), n=subSetSize)[[1]]
+         }
+         attr(toShow, "mat") <- ReDaMoR::is.MatrixModel(tabMod)
+         if(utils::object.size(tmp) > 2^19){
             toShow <- toShow[
                1:max(c(
-                  1, ceiling(nrow(toShow)*(2^19/utils::object.size(toShow)))
+                  1, ceiling(nrow(toShow)*(2^19/utils::object.size(tmp)))
                )),
             ]
          }
@@ -733,27 +826,152 @@
       output$dataSample <- DT::renderDT({
          toShow <- tabSubSet()
          shiny::req(toShow)
-         DT::datatable(
-            toShow,
-            rownames=FALSE,
-            selection = 'single',
-            extensions='Scroller',
-            options = list(
-               deferRender = TRUE,
-               scrollX=TRUE,
-               scrollY = 250,
-               scroller = TRUE,
-               dom=c("ti")
+         if(!attr(toShow, "mat")){
+            mdb <- shiny::isolate(selStatus$mdb)
+            shiny::req(mdb)
+            sel <- shiny::isolate(selStatus$tables) %>% 
+               intersect(names(mdb))
+            shiny::req(sel)
+            shiny::req(length(sel)==1)
+            tabMod <- data_model(mdb)[[sel]]
+            fields <- tabMod$fields$name
+            ##
+            b64_fields <- fields[which(tabMod$fields$type=="base64")]
+            for(b64f in b64_fields){
+               toShow[[b64f]] <- paste0(
+                  '<div width="100%" height="100%" style="color:blue;"',
+                  ' onmouseover="this.style.color=', "'orange'", ';"',
+                  ' onmouseout="this.style.color=',"'blue'", ';">',
+                  "file",
+                  '</div>'
+               )
+            }
+            toShow <- toShow[, fields]
+            ##
+            char_fields <- fields[which(tabMod$fields$type=="character")]
+            for(charf in char_fields){
+               toShow[[charf]] <- ifelse(
+                  nchar(toShow[[charf]]) > 100,
+                  sprintf(
+                     '<span title="%s" style="%s">%s...</span>',
+                     htmltools::htmlEscape(gsub(
+                        '"', '&quot;', toShow[[charf]]
+                     )),
+                     'border-bottom: 1px dashed;',
+                     htmltools::htmlEscape(substr(toShow[[charf]], 1, 90))
+                  ),
+                  toShow[[charf]]
+               )
+            }
+            ##
+            toRet <- DT::datatable(
+               toShow,
+               rownames=attr(toShow, "mat"),
+               selection=if(length(b64_fields)>0){
+                  list(
+                     mode='single', target='cell'
+                  )
+               }else{
+                  "none"
+               },
+               extensions='Scroller',
+               escape=FALSE,
+               options = list(
+                  deferRender = TRUE,
+                  scrollX=TRUE,
+                  scrollY = 250,
+                  scroller = TRUE,
+                  dom=c("ti")
+               )
             )
-         )
+            if(length(b64_fields)>0){
+               toRet <- toRet %>% 
+                  DT::formatStyle(
+                     columns=b64_fields,
+                     "font-style"="italic"
+                  )
+            }
+         }else{
+            toRet <- DT::datatable(
+               toShow,
+               rownames=TRUE,
+               selection="none",
+               extensions='Scroller',
+               escape=FALSE,
+               options = list(
+                  deferRender = TRUE,
+                  scrollX=TRUE,
+                  scrollY = 250,
+                  scroller = TRUE,
+                  dom=c("ti")
+               )
+            )
+         }
+         return(toRet)
       })
+      
+      output$b64Download <- shiny::renderUI({
+         tabss <- tabSubSet()
+         shiny::req(tabss)
+         cs <- input$dataSample_cells_selected
+         shiny::req(cs)
+         shiny::req(!attr(tabss, "mat"))
+         mdb <- shiny::isolate(selStatus$mdb)
+         shiny::req(mdb)
+         sel <- shiny::isolate(selStatus$tables) %>%
+            intersect(names(mdb))
+         shiny::req(sel)
+         tabMod <- data_model(mdb)[[sel]]
+         b64_fields <- tabMod$fields %>%
+            dplyr::filter(.data$type=="base64") %>%
+            dplyr::pull("name")
+         cn <- intersect(colnames(tabss)[cs[2]+1], b64_fields)
+         if(length(cn)==1)
+         return(shiny::tagList(
+            shiny::br(),
+            shiny::downloadButton(
+               "downloadB64",
+               paste("Download", cn)
+            ) 
+         ))
+      })
+      
+      output$downloadB64 <- shiny::downloadHandler(
+         filename = function() {
+            tabss <- tabSubSet()
+            cs <- input$dataSample_cells_selected
+            mdb <- selStatus$mdb
+            sel <- selStatus$tables %>%
+               intersect(names(mdb))
+            f <- colnames(tabss)[cs[2]+1]
+            fd <- data_model(mdb)[[sel]]$fields %>%
+               dplyr::filter(.data$name==!!f) %>%
+               dplyr::pull("comment")
+            extm <- regexpr("^ *[{][.]?[[:alnum:]]+[}]", fd)
+            if(extm==-1){
+               ext <- ""
+            }else{
+               ext <- substr(fd, extm, extm+attr(extm, "match.length")-1) 
+               ext <- sub("[}]", "", sub("^ *[{][.]?", "", ext))
+               ext <- paste0(".", ext)
+            }
+            paste(f, ext, sep="")
+         },
+         content = function(file) {
+            tabss <- tabSubSet()
+            cs <- input$dataSample_cells_selected
+            d <- tabss[cs[1], cs[2]+1, drop=TRUE]
+            writeBin(base64enc::base64decode(d), file)
+         }
+      )
+      
       
       if(dd){
          
          reqtables <- shiny::reactiveVal(character(0))
          tabledone <- shiny::reactiveVal(character(0))
          
-         output$tableDownload <- renderUI({
+         output$tableDownload <- shiny::renderUI({
             tabledone()
             input$refreshTabledown
             mdb <- selStatus$mdb
@@ -779,17 +997,23 @@
             f <- file.path(tddir, fname)
             if(!file.exists(f)){
                return(
+                  shiny::tags$br(),
                   p(
                      strong("The file is being prepared", style="color:blue;"),
-                     shiny::actionButton("refreshTabledown", "Check availability")
+                     shiny::actionButton(
+                        "refreshTabledown", "Check availability"
+                     )
                   )
                )
             }
             return(
+               shiny::tags$br(),
                shiny::a(
-                  list(icon("download"), sprintf("Download %s", sel)),
+                  list(shiny::icon("download"), sprintf("Download %s", sel)),
                   id="downloadTable",
-                  class="btn btn-default shiny-download-link shiny-bound-output",
+                  class=paste(
+                     "btn btn-default shiny-download-link shiny-bound-output"
+                  ),
                   href=file.path("data", session$token, fname),
                   target="_blank",
                   download=""
@@ -797,10 +1021,10 @@
             )
          })
          
-         observeEvent(input$prepTabledown, {
-            mdb <- isolate(selStatus$mdb)
+         shiny::observeEvent(input$prepTabledown, {
+            mdb <- shiny::isolate(selStatus$mdb)
             shiny::req(mdb)
-            sel <- isolate(selStatus$tables) %>% 
+            sel <- shiny::isolate(selStatus$tables) %>% 
                intersect(names(mdb))
             shiny::req(sel)
             shiny::req(length(sel)==1)
@@ -810,7 +1034,7 @@
             tf <- tempfile(tmpdir=tddir, fileext=".txt.gz")
             if(!file.exists(f)){
                if(is.chMDB(mdb)){
-                  p <- isolate(upwd())
+                  p <- shiny::isolate(upwd())
                }
                future::future({
                   if(is.chMDB(mdb)){
@@ -866,7 +1090,7 @@
          mdb <- selStatus$mdb
          shiny::req(!is.null(mdb))
          if(inherits(mdb, "try-error")){
-            n <- isolate(selStatus$resource)
+            n <- shiny::isolate(selStatus$resource)
             shiny::tagList(
                shiny::tags$p(
                   "You don't have access to",
@@ -944,11 +1168,14 @@
       shiny::observe({
          sel <- input$searchResRes_rows_selected
          shiny::req(sel)
-         rt <- isolate(searchRes$resources)
+         rt <- shiny::isolate(searchRes$resources)
          shiny::req(rt)
          mdbListProxy %>%
             DT::selectRows(
-               which(isolate(mdbs$list$name) %in% pull(slice(rt, sel), "name"))
+               which(
+                  shiny::isolate(mdbs$list$name) %in%
+                     dplyr::pull(dplyr::slice(rt, sel), "name")
+               )
             )
       })
       ## _+ tables ----
@@ -1001,15 +1228,16 @@
       shiny::observe({
          sel <- input$searchTabRes_rows_selected
          shiny::req(sel)
-         rt <- isolate(searchRes$tables)
+         rt <- shiny::isolate(searchRes$tables)
          shiny::req(rt)
          mdbListProxy %>%
             DT::selectRows(
                which(
-                  isolate(mdbs$list$name) %in% pull(slice(rt, sel), "resource")
+                  shiny::isolate(mdbs$list$name) %in%
+                     dplyr::pull(dplyr::slice(rt, sel), "resource")
                )
             )
-         selStatus$tables <- rt %>% slice(sel) %>% pull("name")
+         selStatus$tables <- rt %>% dplyr::slice(sel) %>% dplyr::pull("name")
       })
       ## _+ fields ----
       shiny::observe({
@@ -1060,15 +1288,16 @@
       shiny::observe({
          sel <- input$searchFieldRes_rows_selected
          shiny::req(sel)
-         rt <- isolate(searchRes$fields)
+         rt <- shiny::isolate(searchRes$fields)
          shiny::req(rt)
          mdbListProxy %>%
             DT::selectRows(
                which(
-                  isolate(mdbs$list$name) %in% pull(slice(rt, sel), "resource")
+                  shiny::isolate(mdbs$list$name) %in%
+                     dplyr::pull(dplyr::slice(rt, sel), "resource")
                )
             )
-         selStatus$tables <- rt %>% slice(sel) %>% pull("table")
+         selStatus$tables <- rt %>% dplyr::slice(sel) %>% dplyr::pull("table")
       })
       
       ###############################################@
@@ -1076,7 +1305,7 @@
       ###############################################@
       if(is.chTKCat(x)){
          
-         upwd <- reactiveVal(value="")
+         upwd <- shiny::reactiveVal(value="")
             
          ########################@
          ## System information ----
@@ -1124,7 +1353,7 @@
          })
          shiny::observeEvent(input$silink, {
             okConnect(TRUE)
-            showModal(modalDialog(
+            shiny::showModal(shiny::modalDialog(
                title="Sign in",
                shiny::div(
                   shiny::fluidRow(
@@ -1238,10 +1467,68 @@
                session$sendCustomMessage('hideNavs', 'signinTab')
             }
          })
+         
+         ########################@
+         ## User manager ----
+         if(!is.null(userManager)){
+            output$userManager <- shiny::renderUI({
+               shiny::actionLink(
+                  inputId="umlink",
+                  label=shiny::span("User settings", style="margin-left:6px;"),
+                  icon=shiny::icon("user-cog"),
+                  style="margin:0;"
+               )
+            })
+            shiny::observeEvent(input$umlink, {
+               shiny::showModal(shiny::modalDialog(
+                  title="User settings",
+                  shiny::div(
+                     shiny::tags$iframe(
+                        src=userManager, height=600, width="100%"
+                     )
+                  ),
+                  size="l",
+                  easyClose=TRUE
+               ))
+            })
+         }
       }
       
       ########################@
       ## Bookmarks ----
+
+      dtbkmf <- c(
+         "state",
+         "search",
+         "search_columns",
+         "column_clicked",
+         "columns_current",
+         "columns_selected",
+         "columns_all",
+         "columns_last_clicked",
+         "row_clicked",
+         "rows_current",
+         "rows_selected",
+         "rows_all",
+         "row_last_clicked",
+         "cell_clicked",
+         "cells_current",
+         "cells_selected",
+         "cells_all",
+         "cell_last_clicked"
+      )
+      shiny::setBookmarkExclude(c(
+         "searchInput", "sidebarItemExpanded",
+         "silink", "disabledSoLink",
+         "solink",
+         paste("mdbList", dtbkmf, sep="_"),
+         paste("colMembers", dtbkmf, sep="_"),
+         paste("dataSample", dtbkmf, sep="_"),
+         paste("searchResRes", dtbkmf, sep="_"),
+         paste("searchTabRes", dtbkmf, sep="_"),
+         paste("searchFieldRes", dtbkmf, sep="_")
+      )) 
+      
       shiny::observe({
          # Trigger this observer every time an input changes
          shiny::reactiveValuesToList(input)

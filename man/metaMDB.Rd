@@ -9,7 +9,7 @@
 \alias{$.metaMDB}
 \title{A metaMDB object}
 \usage{
-metaMDB(MDBs, relationalTables, dataModel, dbInfo)
+metaMDB(MDBs, relationalTables, dataModel, dbInfo, check = TRUE)
 
 \method{names}{metaMDB}(x) <- value
 
@@ -34,6 +34,9 @@ data model of all the MDBs plus the relational tables}
 \strong{"name"} (only mandatory field), "title", "description", "url",
 "version", "maintainer".}
 
+\item{check}{logical: if TRUE (default) the data are confronted to the
+data model}
+
 \item{x}{a \link{metaMDB} object}
 
 \item{value}{new table names}
@@ -55,7 +58,7 @@ relational tables.
 \itemize{
 \item MDB methods:
 \link{db_info}, \link{data_model}, \link{data_tables}, \link{collection_members},
-\link{count_records}, \link{filter_with_tables}, \link{as_fileMDB}
+\link{count_records}, \link{dims}, \link{filter_with_tables}, \link{as_fileMDB}
 \item Additional general documentation is related to \link{MDB}.
 \item \link{filter.metaMDB}, \link{slice.metaMDB}
 \item \link{get_confrontation_report}, \link[ReDaMoR:format_confrontation_report]{ReDaMoR::format_confrontation_report}

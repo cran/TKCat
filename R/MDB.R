@@ -63,6 +63,19 @@ length.MDB <- function(x){
 
 
 ###############################################################################@
+#' 
+#' @rdname count_records
+#' @method count_records MDB
+#' 
+#' @export
+#'
+count_records.MDB <- function(x, ...){
+   d <- dims(x, ...)
+   d$records %>% magrittr::set_names(d$name)
+}
+
+
+###############################################################################@
 #'
 #' @param x an MDB object
 #' @param use.names return the names of the tables
@@ -94,6 +107,8 @@ format.MDB <- function(x, ...){
          "",
          "%s",
          "%s",
+         "%s",
+         "",
          sep="\n"
       ),
       class(x)[1],
@@ -159,6 +174,11 @@ format.MDB <- function(x, ...){
          is.na(dbi$url) || dbi$url=="",
          '',
          sprintf('(%s)', dbi$url)
+      ),
+      ifelse(
+         is.na(dbi$timestamp),
+         '',
+         sprintf('\nTimesamp: %s', dbi$timestamp)
       )
    ))
 }
@@ -207,7 +227,7 @@ str.MDB <- function(object, ...){
 #' @export
 #'
 select.MDB <- function(.data, ...){
-   i <- tidyselect::eval_select(expr(c(...)), .data)
+   i <- tidyselect::eval_select(rlang::expr(c(...)), .data)
    .data[i]
 }
 
@@ -229,6 +249,90 @@ pull.MDB <- function(.data, var=-1, name=NULL, ...){
    }
    var <- tidyselect::vars_pull(names(.data), !!rlang::enquo(var))
    return(.data[[var]])
+}
+
+
+
+###############################################################################@
+#' Add a collection member to an MDB
+#' 
+#' @param x an [MDB] object
+#' @param collection a collection title in [list_local_collections()]
+#' @param table the table providing the collection member
+#' @param ... definition of the collection fields as lists
+#' (e.g. `be=list(static=TRUE, value="Gene")`
+#' or
+#' `organism=list(static=TRUE, value="Homo sapiens", type="Scientific name")`
+#' )
+#' 
+#' @export
+#' 
+add_collection_member <- function(
+   x,
+   collection,
+   table,
+   ...
+){
+   fd <- list(...)
+   stopifnot(
+      is.MDB(x),
+      is.character(collection), length(collection)==1, !is.na(collection),
+      collection %in% list_local_collections()$title,
+      is.character(table), length(table)==1, !is.na(table),
+      table %in% names(x),
+      length(fd) > 0, length(names(fd))==length(fd),
+      all(unlist(lapply(
+         fd, function(y){
+            all(names(y) %in% c("static", "value", "type")) &&
+               all(c("value", "static") %in% names(y))
+         }
+      )))
+   )
+   resource <- db_info(x)$name
+   cm <- collection_members(x)
+   if(!is.null(cm) && nrow(cm)>0){
+      if(collection %in% cm$collection){
+         cid <- cm$cid[which(cm$collection==collection)][1]
+         mid <- max(cm$mid[which(cm$collection==collection)])+1
+      }else{
+         cid <- paste(resource, collection, "1.0", sep="_")
+         mid <- 1
+      }
+   }else{
+      cid <- paste(resource, collection, "1.0", sep="_")
+      mid <- 1
+   }
+   toAdd <- c()
+   for(field in names(fd)){
+      def <- fd[[field]]
+      toAdd <- rbind(
+         toAdd,
+         dplyr::tibble(
+            field=field, static=def[["static"]], value=def[["value"]],
+            type=ifelse(
+               length(def[["type"]])!=1,
+               as.character(NA),
+               def[["type"]]
+            )
+         )
+      )
+   }
+   toAdd$collection <- collection
+   toAdd$cid <- cid
+   toAdd$resource <- resource
+   toAdd$mid <- as.integer(mid)
+   toAdd$table <- table
+   cm <- rbind(
+      cm,
+      dplyr::select(
+         toAdd,
+         "collection", "cid", "resource", "mid", "table",
+         "field", "static", "value", "type"
+      )
+   )
+   toRet <- x
+   collection_members(toRet) <- cm
+   return(toRet)
 }
 
 ###############################################################################@
@@ -257,7 +361,7 @@ compare_MDB <- function(former, new){
       "Information"=dbif,
       "Former"=unlist(fdbi)[dbif],
       "New"=unlist(ndbi)[dbif]
-   ) %>% mutate(
+   ) %>% dplyr::mutate(
       "Identical"=.data$Former==.data$New
    )
    
@@ -294,7 +398,7 @@ compare_MDB <- function(former, new){
             "Information"=c(sprintf("Table %s", names(fnr)), "Total"),
             "Former"=format(c(fnr, sum(fnr)), big.mark=",", trim=FALSE),
             "New"=format(c(nnr, sum(nnr)), big.mark=",", trim=FALSE)
-         ) %>% mutate(
+         ) %>% dplyr::mutate(
             "Identical"=c(fnr, sum(fnr))==c(nnr, sum(nnr))
          )
       )
@@ -360,6 +464,37 @@ compare_MDB <- function(former, new){
 '$<-.MDB' <- function(x, i, value){
    stop("'$<-' is not supported for MDB")
 }
+
+
+###############################################################################@
+#'
+#' @param ... [MDB] objects
+#'
+#' @rdname MDB
+#' 
+#' @export
+#'
+c.MDB <- function(...){
+   MDBs <- list(...)
+   dbNames <- unlist(lapply(
+      MDBs, function(x) db_info(x)$name
+   ))
+   if(any(duplicated(dbNames))){
+      "MDBs to combine cannot have the same names"
+   }
+   names(MDBs) <- dbNames
+   dbModels <- lapply(MDBs, data_model) %>% 
+      magrittr::set_names(NULL)
+   dataModel <- do.call(c, dbModels)
+   return(metaMDB(
+      MDBs=MDBs,
+      relationalTables=NULL,
+      dataModel=dataModel,
+      dbInfo=db_info(MDBs[[1]]),
+      check=FALSE
+   ))
+}
+
 
 ##############################################################################@
 #' Merge 2 MDBs
@@ -557,8 +692,12 @@ merge.MDB <- function(
          tm <- ReDaMoR::RelTableModel(list(
             tableName=byi$rt,
             fields=dplyr::bind_rows(
-               select(dxcmi, "name", "type", "nullable", "unique", "comment"),
-               select(dycmi, "name", "type", "nullable", "unique", "comment")
+               dplyr::select(
+                  dxcmi, "name", "type", "nullable", "unique", "comment"
+               ),
+               dplyr::select(
+                  dycmi, "name", "type", "nullable", "unique", "comment"
+               )
             ),
             primaryKey=NULL,
             foreignKeys=list(
@@ -606,7 +745,7 @@ merge.MDB <- function(
             ...
          )
          for(cn in colnames(nrt)){
-            nrt[,cn] <- as_type(
+            nrt[,cn] <- ReDaMoR::as_type(
                dplyr::pull(nrt, !!cn),
                tm$fields$type[which(tm$fields$name==cn)]
             )
@@ -889,7 +1028,7 @@ join_mdb_tables <- function(
       type=type,
       jtName=techname
    ) %>% 
-      rename(dplyr::all_of(magrittr::set_names(techname,jtName)))
+      dplyr::rename(dplyr::all_of(magrittr::set_names(techname,jtName)))
    return(toRet)
 }
 
@@ -923,21 +1062,32 @@ get_confrontation_report <- function(){
       }
    }
    optfields <- c(
-      "title", "description", "url",
-      "version", "maintainer"
+      "title"="character", "description"="character", "url"="character",
+      "version"="character", "maintainer"="character",
+      "timestamp"="POSIXct"
    )
-   for(f in optfields){
+   for(f in names(optfields)){
       fv <- dbInfo[[f]]
       if(length(fv)==0){
-         dbInfo[[f]] <- as.character(NA)
+         if(optfields[f]=="character"){
+            dbInfo[[f]] <- as.character(NA)
+         }
+         if(optfields[f]=="POSIXct"){
+            dbInfo[[f]] <- as.POSIXct(NA)
+         }
       }else{
          if(length(fv)>1 || !is.atomic(fv)){
             stop(sprintf("Invalid value for %s", f))
          }
-         dbInfo[[f]] <- as.character(fv)
+         if(optfields[f]=="character"){
+            dbInfo[[f]] <- as.character(fv)
+         }
+         if(optfields[f]=="POSIXct"){
+            dbInfo[[f]] <- as.POSIXct(fv)
+         }
       }
    }
-   dbInfo <- as.list(dbInfo[c(mandFields, optfields)])
+   dbInfo <- as.list(dbInfo[c(mandFields, names(optfields))])
    return(dbInfo)
 }
 

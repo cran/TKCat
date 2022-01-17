@@ -9,6 +9,7 @@ read_fileMDB(
   dbInfo = NULL,
   dataModel = NULL,
   collectionMembers = NULL,
+  check = TRUE,
   n_max = 10,
   verbose = TRUE
 )
@@ -31,9 +32,13 @@ in path. This file should also contains relevant parameters for the
 \itemize{
 \item \strong{delim delimiter} (default: '\\\\t')
 \item \strong{quoted_na}: Should missing values inside quotes be treated
-as missing values or as strings or strings (the default).
-Be aware that the default value here is different than the one for the
-original \code{\link[readr:read_delim]{readr::read_delim()}} function.
+as missing values or as strings or strings.
+WARNING: THIS PARAMETER IS NOT TAKEN INTO ACCOUNT WITH readr>=2.0.0.
+\item \strong{na}: String used for missing values. The default value for reading
+a fileMDB is "NA". But the default value for writing a fileMDB is
+"<NA>".
+This value is written in the DESCRIPTION.json file to avoid ambiguity
+when reading the fileMDB.
 }}
 
 \item{dataModel}{a \link[ReDaMoR:RelDataModel]{ReDaMoR::RelDataModel} object or json file.
@@ -42,6 +47,9 @@ If NULL (default), the model json file found in path/model.}
 \item{collectionMembers}{the members of collections as provided to the
 \link{collection_members<-} function. If NULL (default), the members
 are taken from json files found in path/model/Collections}
+
+\item{check}{logical: if TRUE (default) the data are confronted to the
+data model}
 
 \item{n_max}{maximum number of records to read
 for checks purpose (default: 10). See also \code{\link[ReDaMoR:confront_data]{ReDaMoR::confront_data()}}.}

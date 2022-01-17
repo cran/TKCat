@@ -11,6 +11,8 @@
 #' (e.g. `list(delim='\t', quoted_na=FALSE,)`)
 #' @param collectionMembers the members of collections as provided to the
 #' [collection_members<-] function (default: NULL ==> no member).
+#' @param check logical: if TRUE (default) the data are confronted to the
+#' data model
 #' @param n_max maximum number of records to read
 #' for checks purpose (default: 10). See also [ReDaMoR::confront_data()].
 #' @param verbose if TRUE display the data confrontation report
@@ -21,7 +23,7 @@
 #' @seealso
 #' - MDB methods:
 #' [db_info], [data_model], [data_tables], [collection_members],
-#' [count_records], [filter_with_tables], [as_fileMDB]
+#' [count_records], [dims], [filter_with_tables], [as_fileMDB]
 #' - Additional general documentation is related to [MDB].
 #' - [filter.fileMDB], [slice.fileMDB]
 #' 
@@ -35,6 +37,7 @@ fileMDB <- function(
    dataModel,
    readParameters=DEFAULT_READ_PARAMS,
    collectionMembers=NULL,
+   check=TRUE,
    n_max=10,
    verbose=FALSE
 ){
@@ -62,28 +65,35 @@ fileMDB <- function(
    readParameters <- .check_read_params(readParameters)
    
    ## Confront data to model ----
-   rnDataModel <- dataModel
-   if(length(dataModel)>0){
-      names(rnDataModel) <- sub(
-         pattern="(\\.[[:alnum:]]+)(\\.gz)?$", replacement="",
-         x=basename(dataFiles)
-      )
-      cr <- do.call(ReDaMoR::confront_data, c(
-         list(
-            rnDataModel,
-            paths=dataFiles,
-            returnData=FALSE,
-            verbose=FALSE,
-            n_max=n_max
-         ),
-         readParameters
-      ))
-      assign("confrontationReport", cr, envir=tkcatEnv)
-      if(!cr$success){
-         stop(ReDaMoR::format_confrontation_report(cr, title=dbInfo[["name"]]))
-      }
-      if(verbose){
-         cat(ReDaMoR::format_confrontation_report(cr, title=dbInfo[["name"]]))
+   if(check){
+      rnDataModel <- dataModel
+      if(length(dataModel)>0){
+         names(rnDataModel) <- sub(
+            pattern="(\\.[[:alnum:]]+)(\\.gz)?$", replacement="",
+            x=basename(dataFiles)
+         )
+         cr <- do.call(ReDaMoR::confront_data, c(
+            list(
+               rnDataModel,
+               paths=dataFiles,
+               returnData=FALSE,
+               verbose=FALSE,
+               n_max=n_max
+            ),
+            readParameters
+         ))
+         assign("confrontationReport", cr, envir=tkcatEnv)
+         if(!cr$success){
+            cat(ReDaMoR::format_confrontation_report(
+               cr, title=dbInfo[["name"]]
+            ))
+            stop("Data do not fit the data model")
+         }
+         if(verbose){
+            cat(ReDaMoR::format_confrontation_report(
+               cr, title=dbInfo[["name"]]
+            ))
+         }
       }
    }
    
@@ -118,14 +128,20 @@ fileMDB <- function(
 #' [readr::read_delim()] function. For example:
 #' - **delim delimiter** (default: '\\\\t')
 #' - **quoted_na**: Should missing values inside quotes be treated
-#' as missing values or as strings or strings (the default).
-#' Be aware that the default value here is different than the one for the
-#' original [readr::read_delim()] function.
+#' as missing values or as strings or strings.
+#' WARNING: THIS PARAMETER IS NOT TAKEN INTO ACCOUNT WITH readr>=2.0.0.
+#' - **na**: String used for missing values. The default value for reading
+#' a fileMDB is "NA". But the default value for writing a fileMDB is
+#' "&lt;NA&gt;".
+#' This value is written in the DESCRIPTION.json file to avoid ambiguity
+#' when reading the fileMDB.
 #' @param dataModel a [ReDaMoR::RelDataModel] object or json file.
 #' If NULL (default), the model json file found in path/model.
 #' @param collectionMembers the members of collections as provided to the
 #' [collection_members<-] function. If NULL (default), the members
 #' are taken from json files found in path/model/Collections
+#' @param check logical: if TRUE (default) the data are confronted to the
+#' data model
 #' @param n_max maximum number of records to read
 #' for checks purpose (default: 10). See also [ReDaMoR::confront_data()].
 #' @param verbose if TRUE (default) display the data confrontation report
@@ -143,6 +159,7 @@ read_fileMDB <- function(
    dbInfo=NULL,
    dataModel=NULL,
    collectionMembers=NULL,
+   check=TRUE,
    n_max=10,
    verbose=TRUE
 ){
@@ -203,7 +220,10 @@ read_fileMDB <- function(
    dataFiles <- lapply(
       names(dataModel),
       function(x){
-         f <- list.files(dp, pattern=paste0(x, "(\\.[[:alnum:]]+)(\\.gz)?$"))
+         f <- list.files(
+            dp,
+            pattern=paste0("^", x, "(\\.[[:alnum:]]+)(\\.gz)?$")
+         )
          if(length(f)>1){
             stop(sprintf("There are several files for %s", x))
          }
@@ -240,6 +260,7 @@ read_fileMDB <- function(
       dataModel=dataModel,
       readParameters=readParameters,
       collectionMembers=collectionMembers,
+      check=check,
       n_max=n_max,
       verbose=verbose
    ))
@@ -270,6 +291,13 @@ is.fileMDB <- function(x){
 #' @export
 #'
 'names<-.fileMDB' <- function(x, value){
+   stopifnot(
+      length(x)==length(value),
+      sum(duplicated(value))==0
+   )
+   if(length(x)==0){
+      return(x)
+   }
    colMb <- collection_members(x)
    ovalues <- names(x)
    x <- unclass(x)
@@ -302,10 +330,10 @@ is.fileMDB <- function(x){
 #' @export
 #' 
 rename.fileMDB <- function(.data, ...){
-   loc <- tidyselect::eval_rename(expr(c(...)), .data)
+   loc <- tidyselect::eval_rename(rlang::expr(c(...)), .data)
    names <- names(.data)
    names[loc] <- names(loc)
-   set_names(.data, names)
+   magrittr::set_names(.data, names)
 }
 
 
@@ -457,8 +485,11 @@ data_tables.fileMDB <- function(x, ..., skip=0, n_max=Inf){
       is.numeric(skip), length(skip)==1, skip>=0, is.finite(skip),
       is.numeric(n_max), length(n_max)==1, n_max>0
    )
+   if(length(x)==0){
+      return(list())
+   }
    m <- data_model(x)
-   toTake <- tidyselect::eval_select(expr(c(...)), x)
+   toTake <- tidyselect::eval_select(rlang::expr(c(...)), x)
    if(length(toTake)==0){
       toTake <- 1:length(x)
       names(toTake) <- names(x)
@@ -467,25 +498,14 @@ data_tables.fileMDB <- function(x, ..., skip=0, n_max=Inf){
    toRet <- lapply(
       toTake,
       function(y){
-         ht <- do.call(readr::read_delim, c(
+         toRet <- do.call(.read_td, c(
             list(
-               file=x$dataFiles[y],
-               col_types=ReDaMoR::col_types(m[[y]]),
-               skip=0, n_max=0
+               tm=x$dataModel[[y]],
+               f=x$dataFiles[y],
+               skip=skip, n_max=n_max
             ),
             x$readParameters
          ))
-         toRet <- do.call(readr::read_delim, c(
-            list(
-               file=x$dataFiles[y],
-               col_names=colnames(ht),
-               col_types=ReDaMoR::col_types(m[[y]]),
-               skip=skip+1,
-               n_max=n_max
-            ),
-            x$readParameters
-         ))
-         attr(toRet, "spec") <- NULL
          return(toRet)
       }
    )
@@ -496,32 +516,175 @@ data_tables.fileMDB <- function(x, ..., skip=0, n_max=Inf){
 
 ###############################################################################@
 #' 
-#' @rdname count_records
-#' @method count_records fileMDB
+#' @rdname heads
+#' @method heads fileMDB
 #' 
 #' @export
 #'
-count_records.fileMDB <- function(x, ...){
-   count_lines <- function(f, by=10^5){
-      con <- file(f, "r")
-      on.exit(close(con))
-      d <- c()
-      n <- cn <- length(readLines(con, n=by))
-      while(cn>0){
-         cn <- length(readLines(con, n=by))
-         n <- n+cn
-      }
-      return(n)
+heads.fileMDB <- function(x, ..., n=6L){
+   
+   stopifnot(
+      is.numeric(n), length(n)==1, n>0
+   )
+   if(length(x)==0){
+      return(list())
    }
-   toTake <- tidyselect::eval_select(expr(c(...)), x)
+   m <- data_model(x)
+   toTake <- tidyselect::eval_select(rlang::expr(c(...)), x)
    if(length(toTake)==0){
       toTake <- 1:length(x)
       names(toTake) <- names(x)
    }
-   x <- unclass(x)
-   lapply(x$dataFiles[toTake], count_lines) %>% 
-      unlist() %>% 
-      `-`(1)
+   
+   toRet <- lapply(
+      names(toTake),
+      function(name){
+         
+         if(ReDaMoR::is.MatrixModel(m[[name]])){
+            if(is.infinite(n)){
+               return(data_tables(x, dplyr::all_of(name))[[1]])
+            }
+            ncol <- data_tables(x, dplyr::all_of(name), n_max=1)[[1]] %>% ncol()
+            mn <- min(floor(sqrt(n)), ncol)
+            for(nc in mn:floor(mn/2)){
+               if(n %% nc == 0){
+                  break()
+               }
+            }
+            if(n %% nc == 0){
+               nr <- n %/% nc
+            }else{
+               nr <- nc <- mn
+            }
+            if(nc * nr != n){
+               warning(sprintf("Returning %s records", nc * nr))
+            }
+            d <- data_tables(x, dplyr::all_of(name), n_max=nr)[[1]]
+            return(d[1:min(nr, nrow(d)), 1:nc])
+         }else{
+            return(data_tables(x, dplyr::all_of(name), skip=0, n_max=n)[[1]])
+         }
+         
+      }
+   )
+   names(toRet) <- names(toTake)
+   
+   return(toRet)
+   
+}
+
+
+###############################################################################@
+#' 
+#' @param by the size of the batch: number of lines to count
+#' together (default: 1000)
+#' @param estimateThr file size threshold in bytes from which an estimation
+#' of row number should be computed instead of a precise count
+#' (default: 50000000 = 50MB)
+#' @param estimateSample number of values on which the estimation is based
+#' (default: 10^6)
+#' @param showWarnings a warning is raised by default if estimation is done.
+#' 
+#' @rdname dims
+#' @method dims fileMDB
+#' 
+#' @export
+#'
+dims.fileMDB <- function(
+   x, ...,
+   by=1000,
+   estimateThr=50000000, estimateSample=10^6,
+   showWarnings=TRUE
+){
+   if(length(x)==0){
+      return(dplyr::tibble(
+         name=character(),
+         format=character(),
+         ncol=numeric(),
+         nrow=numeric(),
+         records=numeric(),
+         transposed=logical()
+      ))
+   }
+   count_rc <- function(tn, by=1000){
+      nc <- ncol(data_tables(x, dplyr::all_of(tn), n_max=1)[[1]])
+      f <- data_files(x)$dataFiles[[tn]]
+      con <- file(f, "r")
+      on.exit(close(con))
+      d <- c()
+      nr <- cn <- length(readLines(con, n=by))
+      while(cn>0){
+         cn <- length(readLines(con, n=by))
+         nr <- nr+cn
+      }
+      return(c(nr, nc))
+   }
+   estimate_rc <- function(tn, esamp=10^6){
+      f <- data_files(x)$dataFiles[[tn]]
+      rp <- data_files(x)$readParameters
+      fs <- file.size(f)
+      fcon <- file(f)
+      fc <- summary(fcon)$class=="gzfile"
+      close(fcon)
+      nc <- ncol(data_tables(x, dplyr::all_of(tn), n_max=1)[[1]])
+      rsamp <- round(esamp/nc)
+      st <- data_tables(x, dplyr::all_of(tn), n_max=rsamp)[[1]]
+      if(is.matrix(st)){
+         st <- dplyr::as_tibble(st, rownames="___ROWNAMES___")
+      }
+      tmpf <- tempfile(fileext=ifelse(fc, ".txt.gz", ".txt"))
+      on.exit(file.remove(tmpf))
+      if(fc){
+         tmpc <- gzfile(tmpf)
+      }else{
+         tmpc <- file(tmpf)
+      }
+      utils::write.table(st, file=tmpc, sep=rp$delim)
+      sfs <- file.size(tmpf)
+      nr <- round(fs * (rsamp + 1) / sfs)
+      return(c(nr, nc))
+   }
+   toTake <- tidyselect::eval_select(rlang::expr(c(...)), x)
+   if(length(toTake)==0){
+      toTake <- 1:length(x)
+      names(toTake) <- names(x)
+   }
+   toTake <- names(toTake)
+   do.call(dplyr::bind_rows, lapply(
+      toTake, function(tn){
+         f <- data_files(x)$dataFiles[[tn]]
+         fs <- file.size(f)
+         if(fs > estimateThr){
+            if(showWarnings){
+               warning(sprintf(
+                  "Estimating %s rows based on the first %s values",
+                  tn,
+                  estimateSample
+               ))
+            }
+            n <- estimate_rc(tn, estimateSample)
+         }else{
+            n <- count_rc(tn, by)
+         }
+         dplyr::tibble(
+            name=tn,
+            format=ifelse(
+               ReDaMoR::is.MatrixModel(data_model(x)[[tn]]),
+               "matrix", "table"
+            ),
+            ncol=n[2],
+            nrow=n[1] - 1,
+         ) %>% 
+            dplyr::mutate(
+               records=ifelse(
+                  .data$format=="matrix",
+                  .data$ncol*.data$nrow,
+                  .data$nrow
+               ),
+               transposed=FALSE
+            )
+      }
+   ))
 }
 
 
@@ -557,11 +720,19 @@ data_files <- function(x){
 #'
 data_file_size <- function(x, hr=FALSE){
    df <- data_files(x)$dataFiles
-   toRet <- file.size(df)
+   fs <- file.size(df)
    if(hr){
-      toRet <- .format_file_size(toRet)
+      fs <- .format_file_size(fs)
    }
-   names(toRet) <- names(df)
+   fc <- lapply(
+      df, function(x){
+         fcon <- file(x)
+         toRet <- summary(fcon)$class
+         close(fcon)
+         return(toRet)
+      }
+   ) %>% unlist()
+   toRet <- dplyr::tibble(table=names(df), size=fs, compressed=fc=="gzfile")
    return(toRet)
 }
 
@@ -584,8 +755,9 @@ data_file_size <- function(x, hr=FALSE){
       return(fileMDB(
          dataFiles=as.character(),
          dbInfo=dbi,
-         dataModel=RelDataModel(l=list()),
-         readParameters=data_files(x)$readParameters
+         dataModel=ReDaMoR::RelDataModel(l=list()),
+         readParameters=data_files(x)$readParameters,
+         check=FALSE
       ))
    }
    stopifnot(
@@ -615,7 +787,8 @@ data_file_size <- function(x, hr=FALSE){
       dbInfo=dbi,
       dataModel=dm,
       readParameters=rp,
-      collectionMembers=cm
+      collectionMembers=cm,
+      check=FALSE
    )
    return(toRet)
 }
@@ -656,63 +829,21 @@ data_file_size <- function(x, hr=FALSE){
 
 
 ###############################################################################@
-#'
-#' @param ... [fileMDB] objects
-#'
-#' @rdname fileMDB
-#' 
-#' @export
-#'
-c.fileMDB <- function(...){
-   alldb <- list(...)
-   if(length(alldb)==0){
-      stop("At least one fileMDB should be provided as an input")
-   }
-   df <- data_files(alldb[[1]])
-   rp1 <- df$readParameters
-   for(i in 1:length(alldb)){
-      if(!is.fileMDB(alldb[[i]])){
-         stop("All objects should be fileMDB")
-      }
-      rpi <- data_files(alldb[[i]])$readParameters[names(rp1)]
-      if(!identical(rp1, rpi)){
-         stop("readParameters of all fileMDB should be identical")
-      }
-   }
-   di <- db_info(alldb[[1]])
-   dm <- data_model(alldb[[1]])
-   df <- data_files(alldb[[1]])
-   dc <- collection_members(alldb[[1]])
-   if(length(alldb)>1) for(i in 2:length(alldb)){
-      dm <- c(dm, data_model(alldb[[i]]))
-      df$dataFiles <- c(df$dataFiles, data_files(alldb[[i]])$dataFiles)
-      dc <- dplyr::bind_rows(
-         dc,
-         collection_members(alldb[[i]]) %>%
-            dplyr::mutate(resource=di$name)
-      )
-   }
-   fileMDB(
-      dataFiles=df$dataFiles,
-      dbInfo=di,
-      dataModel=dm,
-      readParameters=df$readParameters,
-      collectionMembers=dc
-   )
-}
-
-
-###############################################################################@
 #' 
 #' @rdname as_fileMDB
 #' @method as_fileMDB fileMDB
+#' 
+#' @param by the size of the batch: number of records to write
+#' together (default: 10^5)
 #' 
 #' @export
 #'
 as_fileMDB.fileMDB <- function(
    x, path,
-   readParameters=DEFAULT_READ_PARAMS,
+   readParameters=list(delim="\t", na="<NA>"),
    htmlModel=TRUE,
+   compress=TRUE,
+   by=10^5,
    ...
 ){
    stopifnot(is.character(path), length(path)==1, !is.na(path))
@@ -749,7 +880,7 @@ as_fileMDB.fileMDB <- function(
    dir.create(modelPath)
    jModelPath <- file.path(modelPath, paste0(dbName, ".json"))
    hModelPath <- file.path(modelPath, paste0(dbName, ".html"))
-   write_json_data_model(dm, jModelPath)
+   ReDaMoR::write_json_data_model(dm, jModelPath)
    if(htmlModel){
       plot(dm) %>%
          visNetwork::visSave(hModelPath)
@@ -781,21 +912,23 @@ as_fileMDB.fileMDB <- function(
    if(rewrite){
       for(tn in names(x)){
          do.call(
-            readr::read_delim_chunked,
+            .read_td_chunked,
             c(
-               list(file=ofiles[tn]),
-               rp,
                list(
-                  col_types=ReDaMoR::col_types(dm[[tn]])
+                  tm=data_model(x)[[tn]],
+                  f=ofiles[tn]
                ),
+               rp,
                list(
                   callback=readr::DataFrameCallback$new(function(y, pos){
                      readr::write_delim(
                         y, file=dfiles[tn], delim=readParameters$delim,
+                        na=readParameters$na,
+                        quote="all", escape="double",
                         append=file.exists(dfiles[tn])
                      )
                   }),
-                  chunk_size=10^5
+                  chunk_size=by
                )
             )
          )
@@ -835,13 +968,16 @@ filter.fileMDB <- function(.data, ..., .preserve=FALSE){
    
    ## Apply rules
    toRet <- list()
-   dots <- enquos(...)
+   dots <- rlang::enquos(...)
    files <- data_files(x)
    rp <- files$readParameters
    files <- files$dataFiles
    for(tn in names(dots)){
       if(!tn %in% names(x)){
          stop(sprintf("%s table does not exist", tn))
+      }
+      if(ReDaMoR::is.MatrixModel(data_model(x)[[tn]])){
+         stop("Cannot filter a matrix: start from another table")         
       }
       toRet[[tn]] <- do.call(
          readr::read_delim_chunked,
@@ -895,6 +1031,10 @@ slice.fileMDB <- function(.data, ..., .preserve=FALSE){
    if(!tn %in% names(x)){
       stop(sprintf("%s table does not exist", tn))
    }
+   if(ReDaMoR::is.MatrixModel(data_model(x)[[tn]])){
+      stop("Cannot slice a matrix: start from another table")         
+   }
+   
    i <- dots[[tn]]
    
    dm <- data_model(x)
@@ -928,12 +1068,17 @@ slice.fileMDB <- function(.data, ..., .preserve=FALSE){
 
 ###############################################################################@
 #' 
+#' @param by the size of the batch: number of lines to process
+#' together (default: 10000)
+#' 
 #' @rdname filter_with_tables
 #' @method filter_with_tables fileMDB
 #' 
 #' @export
 #'
-filter_with_tables.fileMDB <- function(x, tables, checkTables=TRUE){
+filter_with_tables.fileMDB <- function(
+   x, tables, checkTables=TRUE, by=10^5, ...
+){
    
    ## Check the tables ----
    if(checkTables){
@@ -950,7 +1095,7 @@ filter_with_tables.fileMDB <- function(x, tables, checkTables=TRUE){
    fk <- ReDaMoR::get_foreign_keys(dm)
    
    ## Filter by contamination ----
-   tables <- .file_filtByConta(tables, x, fk)
+   tables <- .file_filtByConta(tables, x, fk, dm, by=by)
    dm <- dm[names(tables), rmForeignKeys=TRUE]
    tables <- .norm_data(tables,  dm)
    
@@ -965,18 +1110,139 @@ filter_with_tables.fileMDB <- function(x, tables, checkTables=TRUE){
       dataTables=tables,
       dataModel=dm,
       dbInfo=db_info(x),
-      collectionMembers=cm
+      collectionMembers=cm,
+      check=FALSE
    ))
    
 }
 
+
+###############################################################################@
+#' 
+#' @param .by the size of the batch: number of lines to process
+#' together (default: 10000)
+#' 
+#' @rdname filter_mdb_matrix
+#' @method filter_mdb_matrix fileMDB
+#' 
+#' @export
+#'
+filter_mdb_matrix.fileMDB <- function(x, tableName, .by=10^5, ...){
+   
+   ## Checks ----
+   stopifnot(
+      is.fileMDB(x),
+      tableName %in% names(x)
+   )
+   tableModel <- data_model(x)[[tableName]]
+   stopifnot(ReDaMoR::is.MatrixModel(tableModel))
+   iFilter <- list(...)
+   stopifnot(
+      length(names(iFilter)) > 0, length(iFilter) <= 2, 
+      !any(duplicated(names(iFilter))),
+      all(names(iFilter) %in% tableModel$fields$name)
+   )
+   vfield <- tableModel$fields %>%
+      dplyr::filter(!.data$type %in% c("row", "column")) %>% 
+      dplyr::pull("name") %>% 
+      intersect(names(iFilter))
+   if(length(vfield)>0){
+      stop("Cannot filter a matrix on values; only on row or column names")
+   }
+   
+   ## Select fields ----
+   frc <- c()
+   for(f in names(iFilter)){
+      ft <- tableModel$fields %>%
+         dplyr::filter(.data$name==!!f) %>%
+         dplyr::pull("type")
+      if(ft=="row"){
+         fr <- iFilter[[f]]
+         frc <- c(frc, "r")
+      }else{
+         fc <- iFilter[[f]]
+         frc <- c(frc, "c")
+      }
+   }
+   frc <- paste(sort(frc), collapse="")
+   
+   ## Get the results ----
+   rp <- data_files(x)$readParameters
+   if(frc==""){
+      stop("Dev. error: review this part of the function")
+   }
+   toRet <- do.call(
+      .read_td_chunked,
+      c(
+         list(
+            tm=tableModel,
+            f=data_files(x)$dataFiles[tableName]
+         ),
+         rp,
+         list(
+            callback=readr::DataFrameCallback$new(function(y, pos){
+               if(frc=="r"){
+                  toRet <- y %>%
+                     dplyr::filter(.data$`___ROWNAMES___` %in% fr) %>% 
+                     as.data.frame()
+               }
+               if(frc=="c"){
+                  toRet <-  y %>%
+                     dplyr::select(
+                        dplyr::all_of(intersect(
+                           c("___ROWNAMES___", fc),
+                           colnames(y)
+                        ))
+                     ) %>% 
+                     as.data.frame()
+               }
+               if(frc=="cr"){
+                  toRet <-  y %>%
+                     dplyr::select(
+                        dplyr::all_of(intersect(
+                           c("___ROWNAMES___", fc),
+                           colnames(y)
+                        ))
+                     ) %>% 
+                     dplyr::filter(.data$`___ROWNAMES___` %in% fr) %>% 
+                     as.data.frame()
+               }
+               rownames(toRet) <- toRet$"___ROWNAMES___"
+               toRet <- as.matrix(
+                  toRet[
+                     , setdiff(colnames(toRet), "___ROWNAMES___"), drop=FALSE
+                  ]
+               )
+               return(toRet)
+            }),
+            chunk_size=.by
+         )
+      )
+   )
+   if(frc=="r"){
+      toRet <- toRet[intersect(fr, rownames(toRet)),, drop=FALSE]
+   }
+   if(frc=="c"){
+      toRet <- toRet[,intersect(fc, colnames(toRet)), drop=FALSE]
+   }
+   if(frc=="cr"){
+      toRet <- toRet[
+         intersect(fr, rownames(toRet)),
+         intersect(fc, colnames(toRet)),
+         drop=FALSE
+      ]
+   }
+   return(toRet)
+}
+
+
 ###############################################################################@
 ## READ PARAMETERS -----
-DEFAULT_READ_PARAMS <- list(delim='\t', quoted_na=FALSE)
+DEFAULT_READ_PARAMS <- list(delim='\t', na="NA")
 
 .check_read_params <- function(readParameters){
    readParameters <- readParameters[intersect(
-      names(readParameters), names(DEFAULT_READ_PARAMS)
+      names(readParameters), c(names(DEFAULT_READ_PARAMS), "quoted_na")
    )]
    if("delim" %in% names(readParameters)){
       stopifnot(
@@ -986,10 +1252,21 @@ DEFAULT_READ_PARAMS <- list(delim='\t', quoted_na=FALSE)
       )
    }
    if("quoted_na" %in% names(readParameters)){
+      warning(
+         "The `quoted_na` argument of `read_delim()` is deprecated",
+         " as of readr 2.0.0."
+      )
       stopifnot(
          length(readParameters$quoted_na)==1,
          is.logical(readParameters$quoted_na),
          !is.na(readParameters$quoted_na)
+      )
+   }
+   if("na" %in% names(readParameters)){
+      stopifnot(
+         length(readParameters$na)==1,
+         is.character(readParameters$na),
+         !is.na(readParameters$na)
       )
    }
    return(c(
@@ -1003,32 +1280,172 @@ DEFAULT_READ_PARAMS <- list(delim='\t', quoted_na=FALSE)
 
 ###############################################################################@
 ## Helpers ----
-.write_chTables.fileMDB <- function(x, con, dbName, by=10^5){
+.write_chTables.fileMDB <- function(x, con, dbName, by=10^5, ...){
    dm <- data_model(x)
    df <- data_files(x)
    rp <- df$readParameters
    df <- df$dataFiles
    for(tn in names(x)){
-      do.call(
-         readr::read_delim_chunked,
-         c(
-            list(file=df[tn]),
-            rp,
-            list(
-               col_types=ReDaMoR::col_types(dm[[tn]])
-            ),
-            list(
-               callback=readr::DataFrameCallback$new(function(y, pos){
-                  ch_insert(con=con, dbName=dbName, tableName=tn, value=y)
-               }),
-               chunk_size=by
+      if(ReDaMoR::is.MatrixModel(dm[[tn]])){
+         
+         nullable <- dm[[tn]]$fields %>% 
+            dplyr::filter(!.data$type %in% c("column", "row")) %>% 
+            dplyr::pull("nullable")
+         vtype <- setdiff(dm[[tn]]$fields$type, c("column", "row"))
+         ddim <- dims(x, dplyr::all_of(tn), showWarnings=FALSE)
+         
+         if(ddim$ncol > CH_MAX_COL && ddim$nrow < ddim$ncol){
+            
+            transposed <- TRUE
+            tlist <- do.call(
+               .read_td_chunked,
+               c(
+                  list(tm=dm[[tn]], f=df[tn]),
+                  rp,
+                  list(
+                     callback=readr::DataFrameCallback$new(function(y, pos){
+                        rn <- y$"___ROWNAMES___"
+                        y <- t(y[, -1]) %>%
+                           magrittr::set_colnames(rn) %>% 
+                           dplyr::as_tibble(rownames="___COLNAMES___")
+                        tname <- uuid::UUIDgenerate(n=1)
+                        nulcol <- NULL
+                        if(nullable){
+                           nulcol <- setdiff(colnames(y), "___COLNAMES___")
+                        }
+                        write_MergeTree(
+                           con=con,
+                           dbName=dbName,
+                           tableName=tname,
+                           value=y,
+                           rtypes=c("character", rep(vtype, ncol(y) - 1)) %>% 
+                              magrittr::set_names(colnames(y)),
+                           nullable=nulcol,
+                           sortKey=colnames(y)[1]
+                        )
+                        return(tname)
+                     }),
+                     chunk_size=CH_MAX_COL
+                  )
+               )
+            ) %>% as.character()
+            ch_insert(
+               con=con, dbName=dbName, tableName=tn,
+               value=dplyr::tibble(table=tlist)
+            )
+            
+         }else{
+            
+            transposed <- FALSE
+            cnames <- data_tables(x, dplyr::all_of(tn), n_max=1)[[1]] %>%
+               colnames() %>% 
+               sort()
+            colList <- seq(1, ddim$ncol, by=CH_MAX_COL)
+            colList <- lapply(
+               colList,
+               function(i){
+                  cnames[i:min(i+CH_MAX_COL-1, ddim$ncol)]
+               }
+            )
+            names(colList) <- uuid::UUIDgenerate(n=length(colList))
+            
+            lapply(names(colList), function(tname){
+               fields <- colList[[tname]]
+               tval <- dplyr::tibble(
+                  "___ROWNAMES___"=character()
+               )
+               for(field in fields){
+                  toAdd <- integer()
+                  class(toAdd) <- vtype
+                  toAdd <- dplyr::tibble(toAdd) %>% 
+                     magrittr::set_colnames(field)
+                  tval <- dplyr::bind_cols(tval, toAdd)
+               }
+               nulcol <- NULL
+               if(nullable){
+                  nulcol <- fields
+               }
+               write_MergeTree(
+                  con=con,
+                  dbName=dbName,
+                  tableName=tname,
+                  value=tval,
+                  rtypes=c("character", rep(vtype, length(fields))) %>% 
+                     magrittr::set_names(colnames(tval)),
+                  nullable=nulcol,
+                  sortKey=colnames(tval)[1]
+               )
+            })
+            
+            do.call(
+               .read_td_chunked,
+               c(
+                  list(tm=dm[[tn]], f=df[tn]),
+                  rp,
+                  list(
+                     callback=readr::DataFrameCallback$new(function(y, pos){
+                        lapply(names(colList), function(tname){
+                           fields <- colList[[tname]]
+                           tval <- y[,c("___ROWNAMES___", fields)]
+                           ch_insert(
+                              con=con,
+                              dbName=dbName,
+                              tableName=tname,
+                              value=tval
+                           )
+                        })
+                     }),
+                     chunk_size=by
+                  )
+               )
+            )
+            ch_insert(
+               con=con, dbName=dbName, tableName=tn,
+               value=dplyr::tibble(table=names(colList))
+            )
+            
+         }
+         
+      }else{
+         do.call(
+            .read_td_chunked,
+            c(
+               list(tm=dm[[tn]], f=df[tn]),
+               rp,
+               list(
+                  callback=readr::DataFrameCallback$new(function(y, pos){
+                     toWrite <- y
+                     b64_fields <- dm[[tn]]$fields %>% 
+                        dplyr::filter(.data$type=="base64") %>% 
+                        dplyr::pull("name")
+                     for(b64f in b64_fields){
+                        toWrite[[b64f]] <- lapply(
+                           toWrite[[b64f]], function(v){
+                              if(is.na(v)){
+                                 return(character())
+                              }
+                              sl <- c(
+                                 seq(1, nchar(v), by=CH_DOC_CHUNK),
+                                 nchar(v) + 1
+                              )
+                              return(substring(v, sl[-length(sl)], sl[-1]-1))
+                           }
+                        )
+                     }
+                     ch_insert(
+                        con=con, dbName=dbName, tableName=tn, value=toWrite
+                     )
+                  }),
+                  chunk_size=by
+               )
             )
          )
-      )
+      }
    }
 }
 
-.file_filtByConta <- function(d, fdb, fk){
+
+.file_filtByConta <- function(d, fdb, fk, dm, by=10^5){
    nfk <- fk
    files <- data_files(fdb)
    rp <- files$readParameters
@@ -1040,42 +1457,48 @@ DEFAULT_READ_PARAMS <- list(delim='\t', quoted_na=FALSE)
       fkf <- fk %>% dplyr::filter(.data$from==!!tn & .data$fmin>0)
       fkt <- fk %>% dplyr::filter(.data$to==!!tn & .data$tmin>0)
       nfk <<- nfk %>%
-         dplyr::anti_join(select(fkf, "from", "to"), by=c("from", "to")) %>% 
-         dplyr::anti_join(select(fkt, "from", "to"), by=c("from", "to"))
+         dplyr::anti_join(
+            dplyr::select(fkf, "from", "to"), by=c("from", "to")
+         ) %>% 
+         dplyr::anti_join(dplyr::select(fkt, "from", "to"), by=c("from", "to"))
       fkl <- dplyr::bind_rows(
          fkf,
          fkt %>% dplyr::rename("from"="to", "ff"="tf", "to"="from", "tf"="ff")
       ) %>% 
-         distinct()
+         dplyr::distinct()
       if(nrow(fkl)>0){
          for(i in 1:nrow(fkl)){
             ntn <- fkl$to[i]
             if(ntn %in% names(d)){
-               nv <- dplyr::semi_join(
-                  d[[ntn]], d[[tn]],
+               nv <- .mdjoin(
+                  d1=d[[ntn]], d2=d[[tn]],
                   by=magrittr::set_names(
                      fkl$ff[[i]], fkl$tf[[i]]
-                  )
+                  ),
+                  tm1=dm[[ntn]], tm2=dm[[tn]]
                )
             }else{
                nv <- do.call(
-                  readr::read_delim_chunked,
+                  .read_td_chunked,
                   c(
-                     list(file=files[ntn]),
+                     list(tm=dm[[ntn]], f=files[ntn]),
                      rp,
                      list(
-                        col_types=ReDaMoR::col_types(dm[[ntn]])
-                     ),
-                     list(
                         callback=readr::DataFrameCallback$new(function(y, pos){
-                           dplyr::semi_join(
-                              y, d[[tn]],
+                           if(ReDaMoR::is.MatrixModel(dm[[ntn]])){
+                              y <- as.data.frame(y, stringsAsFactors=FALSE)
+                              rownames(y) <- y[[1]]
+                              y <- as.matrix(y[, -1, drop=FALSE])
+                           }
+                           .mdjoin(
+                              d1=y, d2=d[[tn]],
                               by=magrittr::set_names(
                                  fkl$ff[[i]], fkl$tf[[i]]
-                              )
+                              ),
+                              tm1=dm[[ntn]], tm2=dm[[tn]]
                            )
                         }),
-                        chunk_size=10^5
+                        chunk_size=by
                      )
                   )
                )
@@ -1088,42 +1511,57 @@ DEFAULT_READ_PARAMS <- list(delim='\t', quoted_na=FALSE)
       fkf <- fk %>% dplyr::filter(.data$from==!!tn & .data$fmin==0)
       fkt <- fk %>% dplyr::filter(.data$to==!!tn & .data$tmin==0)
       nfk <<- nfk %>%
-         dplyr::anti_join(select(fkf, "from", "to"), by=c("from", "to")) %>% 
-         dplyr::anti_join(select(fkt, "from", "to"), by=c("from", "to"))
+         dplyr::anti_join(
+            dplyr::select(fkf, "from", "to"), by=c("from", "to")
+         ) %>% 
+         dplyr::anti_join(dplyr::select(fkt, "from", "to"), by=c("from", "to"))
       fkl <- dplyr::bind_rows(
          fkf,
          fkt %>% dplyr::rename("from"="to", "ff"="tf", "to"="from", "tf"="ff")
       ) %>% 
-         distinct()
+         dplyr::distinct()
       if(nrow(fkl)>0){
          for(i in 1:nrow(fkl)){
             ntn <- fkl$to[i]
             toAdd <- do.call(
-               readr::read_delim_chunked,
+               .read_td_chunked,
                c(
-                  list(file=files[ntn]),
+                  list(tm=dm[[ntn]], f=files[ntn]),
                   rp,
                   list(
-                     col_types=ReDaMoR::col_types(dm[[ntn]])
-                  ),
-                  list(
                      callback=readr::DataFrameCallback$new(function(y, pos){
-                        dplyr::semi_join(
-                           y, d[[tn]],
+                        if(ReDaMoR::is.MatrixModel(dm[[ntn]])){
+                           y <- as.data.frame(y, stringsAsFactors=FALSE)
+                           rownames(y) <- y[[1]]
+                           y <- as.matrix(y[, -1, drop=FALSE])
+                        }
+                        .mdjoin(
+                           d1=y, d2=d[[tn]],
                            by=magrittr::set_names(
                               fkl$ff[[i]], fkl$tf[[i]]
-                           )
+                           ),
+                           tm1=dm[[ntn]], tm2=dm[[tn]]
                         )
                      }),
-                     chunk_size=10^5
+                     chunk_size=by
                   )
                )
             )
-            d[[ntn]] <<- dplyr::bind_rows(
-               d[[ntn]],
-               toAdd
-            ) %>%
-               dplyr::distinct()
+            
+            if(is.matrix(toAdd)){
+               d[[ntn]] <<- fdb[[ntn]][
+                  c(rownames(d[[ntn]]), rownames(toAdd)),
+                  c(colnames(d[[ntn]]), colnames(toAdd)),
+                  drop=FALSE
+               ]
+            }else{
+               d[[ntn]] <<- dplyr::bind_rows(
+                  d[[ntn]],
+                  toAdd
+               ) %>%
+                  dplyr::distinct()
+            }
+            
          }
       }
    }
@@ -1133,7 +1571,7 @@ DEFAULT_READ_PARAMS <- list(delim='\t', quoted_na=FALSE)
       }
    }
    if(!is.null(fk) && nrow(fk) > nrow(nfk)){
-      d <- .file_filtByConta(d, fdb, nfk)
+      d <- .file_filtByConta(d, fdb, nfk, dm)
    }
    return(d)
 }
@@ -1154,3 +1592,130 @@ DEFAULT_READ_PARAMS <- list(delim='\t', quoted_na=FALSE)
    return(paste(toRet, sunits[nunits+1]))
 }
 
+.read_td <- function(
+   tm,      # table model
+   f,       # file name
+   delim,
+   skip=0,
+   n_max=Inf,
+   ...      # additional parameters for read_delim()
+){
+   
+   if(ReDaMoR::is.MatrixModel(tm)){
+      cn <- readLines(f, n=1) %>%
+         strsplit(split=delim) %>%
+         unlist()
+      cn <- gsub("['`]", "", cn)
+      cn <- gsub('["]', "", cn)
+
+      vt <- tm$fields %>%
+         dplyr::filter(!.data$type %in% c("row", "column")) %>%
+         dplyr::pull("type")
+      ctypes <- do.call(
+         readr::cols,
+         structure(
+            list(
+               readr::col_character(),
+               .default = switch(
+                  vt,
+                  "integer"=readr::col_integer(),
+                  "numeric"=readr::col_double(),
+                  "logical"=readr::col_logical(),
+                  "character"=readr::col_character(),
+                  "Date"=readr::col_date(),
+                  "POSIXct"=readr::col_datetime(),
+                  "base64"=readr::col_character()
+               )
+            ),
+            .Names=c("___ROWNAMES___", ".default")
+         )
+      )
+      td <- readr::read_delim(
+         f,
+         delim=delim, n_max=n_max, skip=skip+1,
+         col_types=ctypes,
+         col_names=c("___ROWNAMES___", cn[-1]),
+         ...
+      ) %>%
+         as.data.frame(stringsAsFactors=FALSE)
+      stopifnot(
+         !any(duplicated(colnames(td))),
+         !any(duplicated(td[[1]]))
+      )
+      rownames(td) <- td[[1]]
+      td <- as.matrix(td[, -1, drop=FALSE])
+         
+   }else{
+      
+      td <- readr::read_delim(
+         f,
+         delim=delim, skip=skip, n_max=n_max,
+         col_types=ReDaMoR::col_types(tm),
+         ...
+      )
+      
+   }
+   
+   return(td)
+   
+}
+
+
+.read_td_chunked <- function(
+   tm,      # table model
+   f,       # file name
+   delim,
+   skip=0,
+   ...      # additional parameters for read_delim_chunked()
+){
+   
+   if(ReDaMoR::is.MatrixModel(tm)){
+      cn <- readLines(f, n=1) %>%
+         strsplit(split=delim) %>%
+         unlist()
+      cn <- gsub("['`]", "", cn)
+      cn <- gsub('["]', "", cn)
+      
+      vt <- tm$fields %>%
+         dplyr::filter(!.data$type %in% c("row", "column")) %>%
+         dplyr::pull("type")
+      ctypes <- do.call(
+         readr::cols,
+         structure(
+            list(
+               readr::col_character(),
+               .default = switch(
+                  vt,
+                  "integer"=readr::col_integer(),
+                  "numeric"=readr::col_double(),
+                  "logical"=readr::col_logical(),
+                  "character"=readr::col_character(),
+                  "Date"=readr::col_date(),
+                  "POSIXct"=readr::col_datetime()
+               )
+            ),
+            .Names=c("___ROWNAMES___", ".default")
+         )
+      )
+      td <- readr::read_delim_chunked(
+         f,
+         delim=delim, skip=skip+1,
+         col_types=ctypes,
+         col_names=c("___ROWNAMES___", cn[-1]),
+         ...
+      )
+      
+   }else{
+      
+      td <- readr::read_delim_chunked(
+         f,
+         delim=delim, skip=skip,
+         col_types=ReDaMoR::col_types(tm),
+         ...
+      )
+      
+   }
+   
+   return(td)
+   
+}

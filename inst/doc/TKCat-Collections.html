@@ -11,12 +11,12 @@
 
 <meta name="author" content="Patrice Godard" />
 
-<meta name="date" content="2021-03-03" />
+<meta name="date" content="2022-01-14" />
 
 <title>TKCat Collections</title>
 
-<script src="libs/header-attrs-2.7/header-attrs.js"></script>
-<script src="libs/jquery-1.11.3/jquery.min.js"></script>
+<script src="libs/header-attrs-2.11/header-attrs.js"></script>
+<script src="libs/jquery-3.6.0/jquery-3.6.0.min.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link href="libs/bootstrap-3.3.5/css/cerulean.min.css" rel="stylesheet" />
 <script src="libs/bootstrap-3.3.5/js/bootstrap.min.js"></script>
@@ -227,12 +227,12 @@ div.tocify {
 
 <!-- setup 3col/9col grid for toc_float and main content  -->
 <div class="row">
-<div class="col-sm-12 col-md-4 col-lg-3">
+<div class="col-xs-12 col-sm-4 col-md-3">
 <div id="TOC" class="tocify">
 </div>
 </div>
 
-<div class="toc-content col-sm-12 col-md-8 col-lg-9">
+<div class="toc-content col-xs-12 col-sm-8 col-md-9">
 
 
 
@@ -243,7 +243,7 @@ div.tocify {
 
 <h1 class="title toc-ignore">TKCat Collections</h1>
 <h4 class="author">Patrice Godard</h4>
-<h4 class="date">March 03, 2021</h4>
+<h4 class="date">January 14, 2022</h4>
 
 </div>
 
@@ -252,17 +252,17 @@ div.tocify {
 <p><img src="libs/figs/TKCat.png" style="width:100.0%" /></p>
 </div>
 <div id="introduction" class="section level1" number="1">
-<h1 number="1"><span class="header-section-number">1</span> Introduction</h1>
+<h1><span class="header-section-number">1</span> Introduction</h1>
 <p>The aim of TKCat (Tailored Knowledge Catalog) is to facilitate the management of data from knowledge resources that are frequently used alone or together in research environments. In TKCat, knowledge resources are manipulated as modeled database (MDB) objects. These objects provide access to the data tables along with a general description of the resource and a detail data model generated with <a href="https://github.com/patzaw/ReDaMoR">ReDaMoR</a> documenting the tables, their fields and their relationships. These MDB are then gathered in catalogs that can be easily explored an shared. TKCat provides tools to easily subset, filter and combine MDBs and create new catalogs suited for specific needs.</p>
 <p>The TKCat R package is licensed under <a href="https://www.gnu.org/licenses/gpl-3.0.en.html">GPL-3</a>.</p>
 <p>Some MDBs refer to the same concepts and could be merged accordingly. However they often use different vocabularies or scopes. Collections are a used to identify such concepts and to define a way to document formally the scope used by the different members of these collections. Thanks to this formal description, tools can be used to automatically combine MDBs refering to the same collection but using different scopes.</p>
 <p>This vignette describes how to create TKCat Collections, document collection members and create functions to support the merging of MDBs. The advantages and uses of Collections are presented in the <a href="TKCat-User-guide.html#merging-with-collections">general user guide</a>.</p>
 </div>
 <div id="creating-a-collection" class="section level1" number="2">
-<h1 number="2"><span class="header-section-number">2</span> Creating a collection</h1>
+<h1><span class="header-section-number">2</span> Creating a collection</h1>
 <p>A collection is defined by a JSON document. This document should fulfill the requirements defined by the <a href="https://github.com/patzaw/TKCat/blob/master/inst/Collections/Collection-Schema.json">Collection-Schema.json</a>. Two collection are available by default in the TKCat package.</p>
 <pre class="r"><code>list_local_collections()</code></pre>
-<pre><code>## # A tibble: 2 x 2
+<pre><code>## # A tibble: 2 × 2
 ##   title     description                                  
 ##   &lt;chr&gt;     &lt;chr&gt;                                        
 ## 1 BE        Collection of biological entity (BE) concepts
@@ -271,7 +271,7 @@ div.tocify {
 <pre class="r"><code>get_local_collection(&quot;BE&quot;) %&gt;%
    paste(&#39;```json&#39;, ., &#39;```&#39;, sep=&quot;\n&quot;) %&gt;% cat()</code></pre>
 <pre class="json"><code>{
-   &quot;$schema&quot;: &quot;TKCat_collections_1.0&quot;,
+   &quot;$schema&quot;: &quot;https://json-schema.org/draft/2019-09/schema&quot;,
    &quot;$id&quot;:&quot;TKCat_BE_collection_1.0&quot;,
     &quot;title&quot;: &quot;BE collection&quot;,
     &quot;type&quot;: &quot;object&quot;,
@@ -367,7 +367,7 @@ div.tocify {
 </ul>
 </div>
 <div id="identifying-collection-members" class="section level1" number="3">
-<h1 number="3"><span class="header-section-number">3</span> Identifying collection members</h1>
+<h1><span class="header-section-number">3</span> Identifying collection members</h1>
 <p>Identifying collection members of an <em>MDB</em> can be done by providing a table as shown in the <a href="TKCat-User-guide.html#hpo">general user guide</a> or by writing a JSON file like the following one which correspond to BE members of the CHEMBL MDB.</p>
 <pre class="r"><code>system.file(
    &quot;examples/CHEMBL/model/Collections/BE-CHEMBL_BE_1.0.json&quot;,
@@ -410,13 +410,14 @@ div.tocify {
       &quot;examples/CHEMBL/model/Collections/BE-CHEMBL_BE_1.0.json&quot;,
       package=&quot;TKCat&quot;
    ),
-   schema=get_local_collection(&quot;BE&quot;)
+   schema=get_local_collection(&quot;BE&quot;),
+   engine=&quot;ajv&quot;
 )</code></pre>
 <pre><code>## [1] TRUE</code></pre>
 <p>This validation is done automatically when reading a <em>fileMDB</em> object or when setting collection members with the <code>collection_members()</code> function.</p>
 </div>
 <div id="collection-mapper-functions" class="section level1" number="4">
-<h1 number="4"><span class="header-section-number">4</span> Collection mapper functions</h1>
+<h1><span class="header-section-number">4</span> Collection mapper functions</h1>
 <p>The <code>merge.MDB()</code> and the <code>map_collection_members()</code> functions rely on functions to map members of the same collection. When recorded (using the <code>import_collection_mapper()</code> function), these function can be automatically identified by TKCat, otherwise or according to user needs, these functions could be provided using the <code>funs</code> (for <code>merge.MDB()</code>) or the <code>fun</code> (for <code>map_collection_members()</code>) parameters. Two mappers are pre-recorded in TKCat, one for the <em>BE</em> collection and one for the <em>Condition</em> collection. They can be retrieved with the <code>get_collection_mapper()</code> function.</p>
 <pre class="r"><code>get_collection_mapper(&quot;BE&quot;)</code></pre>
 <pre class="r"><code>function (x, y, orthologs = FALSE, restricted = FALSE, ...) 
@@ -516,7 +517,7 @@ div.tocify {
 <p>A mapper function must have at least an x and a y parameters. Each of them should be a data.frame with all the field values corresponding to the fields defined in the collection. Additional parameters can be defined and will be forwarded using <code>...</code>. This function should return a data frame with all the fields values followed by “_x” and “_y” suffix accordingly.</p>
 </div>
 <div id="acknowledgments" class="section level1" number="5">
-<h1 number="5"><span class="header-section-number">5</span> Acknowledgments</h1>
+<h1><span class="header-section-number">5</span> Acknowledgments</h1>
 <p>This work was entirely supported by <a href="https://www.ucb.com/">UCB Pharma</a> (Early Solutions department).</p>
 </div>
 
@@ -558,6 +559,9 @@ $(document).ready(function () {
 
 <script>
 $(document).ready(function ()  {
+
+    // temporarily add toc-ignore selector to headers for the consistency with Pandoc
+    $('.unlisted.unnumbered').addClass('toc-ignore')
 
     // move toc-ignore selectors from section div to header
     $('div.section.toc-ignore')
