@@ -385,16 +385,20 @@ TKCAT_LOGO_DIV <- shiny::div(
                   substr(x, 2, nchar(x))
                )
             })
-         cm <- mdbs$collections %>%
-            dplyr::select("collection", "resource") %>%
-            dplyr::distinct() %>%
-            dplyr::group_by(.data$resource) %>% 
-            dplyr::summarize(
-               collection=paste(.data$collection, collapse=", ")
-            ) %>%
-            dplyr::ungroup() %>%
-            dplyr::rename("Collections"="collection")
-         toShow <- dplyr::left_join(toShow, cm, by=c("Resource"="resource"))
+         if(nrow(mdbs$collections)>0){
+            cm <- mdbs$collections %>%
+               dplyr::select("collection", "resource") %>%
+               dplyr::distinct() %>%
+               dplyr::group_by(.data$resource) %>% 
+               dplyr::summarize(
+                  collection=paste(.data$collection, collapse=", ")
+               ) %>%
+               dplyr::ungroup() %>%
+               dplyr::rename("Collections"="collection")
+            toShow <- dplyr::left_join(toShow, cm, by=c("Resource"="resource"))
+         }else{
+            toShow <- dplyr::mutate(toShow, Collection=NA)
+         }
          mdbs$validInput <- TRUE
          toRet <- DT::datatable(
             dplyr::mutate(
@@ -893,7 +897,7 @@ TKCAT_LOGO_DIV <- shiny::div(
             }
          }else{
             toRet <- DT::datatable(
-               toShow,
+               as.matrix(toShow),
                rownames=TRUE,
                selection="none",
                extensions='Scroller',
@@ -996,17 +1000,17 @@ TKCAT_LOGO_DIV <- shiny::div(
             }
             f <- file.path(tddir, fname)
             if(!file.exists(f)){
-               return(
+               return(shiny::tagList(
                   shiny::tags$br(),
-                  p(
+                  shiny::p(
                      strong("The file is being prepared", style="color:blue;"),
                      shiny::actionButton(
                         "refreshTabledown", "Check availability"
                      )
                   )
-               )
+               ))
             }
-            return(
+            return(shiny::tagList(
                shiny::tags$br(),
                shiny::a(
                   list(shiny::icon("download"), sprintf("Download %s", sel)),
@@ -1018,7 +1022,7 @@ TKCAT_LOGO_DIV <- shiny::div(
                   target="_blank",
                   download=""
                )
-            )
+            ))
          })
          
          shiny::observeEvent(input$prepTabledown, {
@@ -1316,12 +1320,18 @@ TKCAT_LOGO_DIV <- shiny::div(
                   shiny::tags$li(
                      shiny::tags$strong("Host"), ":", xparams$host
                   ),
-                  shiny::tags$li(
-                     shiny::tags$strong("Native port"), ":", k$chcon@port
-                  ),
-                  shiny::tags$li(
-                     shiny::tags$strong("HTTP port"), ":", k$http
-                  ),
+                  if(length(k$ports) > 0 ){
+                     shiny::tags$li(
+                        shiny::tags$strong("Available ports"), ":",
+                        do.call(shiny::tags$ul, lapply(names(k$ports), function(n){
+                           shiny::tags$li(
+                              shiny::tags$strong(n), ":", k$ports[n]
+                           )
+                        }))
+                     )
+                  }else{
+                     NULL
+                  },
                   shiny::tags$li(
                      shiny::tags$strong("Current user"), ":", k$chcon@user
                   ),

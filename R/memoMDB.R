@@ -40,8 +40,8 @@ memoMDB <- function(
    ## DB information ----
    dbInfo <- .check_dbInfo(dbInfo)
    
+   ## Confront data tables to the model ----
    if(check){
-      ## Confront data tables to the model ----
       cr <- ReDaMoR::confront_data(
          dataModel, data=dataTables, checks=checks, verbose=FALSE,
          returnData=FALSE
@@ -63,6 +63,7 @@ memoMDB <- function(
       dbInfo=dbInfo
    )
    class(toRet) <- c("memoMDB", "MDB", class(toRet))
+   
    
    ## Collection members ----
    collection_members(toRet) <- collectionMembers
@@ -334,7 +335,7 @@ data_tables.memoMDB <- function(x, ..., skip=0, n_max=Inf){
       x$dataTables[toTake],
       function(d){
          if(skip >= nrow(d)){
-            return(d[c(),])
+            return(d[integer(0),, drop=FALSE])
          }
          n <- skip+1
          m <- min(nrow(d), n_max+skip)
@@ -431,10 +432,13 @@ dims.memoMDB <- function(x, ...){
          return(
             dplyr::tibble(
                name=n,
-               format=ifelse(is.matrix(y), "matrix", "table"),
+               format=ifelse(is.data.frame(y), "table", class(y)[1]),
                ncol=ncol(y),
                nrow=nrow(y),
-               records=ifelse(is.matrix(y), ncol(y)*nrow(y), nrow(y)),
+               records=ifelse(
+                  is.data.frame(y), nrow(y),
+                  as.numeric(ncol(y)) * as.numeric(nrow(y))
+               ),
                transposed=FALSE
             )
          )
@@ -509,7 +513,22 @@ dims.memoMDB <- function(x, ...){
    stopifnot(
       length(i)==1
    )
-   return(data_tables(x, dplyr::all_of(i))[[1]])
+   ## Rstudio hack to avoid DB call when just looking for names
+   cc <- grep('.rs.getCompletionsDollar', deparse(sys.calls()), value=FALSE)
+   if(length(cc)!=0){
+      invisible(NULL)
+   }else{
+      cc <- c(
+         grep('.rs.valueContents', deparse(sys.calls()), value=FALSE),
+         grep('.rs.explorer.inspectObject', deparse(sys.calls()), value=FALSE)
+      )
+      if(length(cc)!=0){
+         invisible()
+      }else{
+         return(data_tables(x, dplyr::all_of(i))[[1]])
+      }
+   }
+   # return(data_tables(x, dplyr::all_of(i))[[1]])
 }
 #' @rdname memoMDB
 #' 
@@ -584,17 +603,43 @@ as_fileMDB.memoMDB <- function(
    dfiles <- file.path(dataPath, paste0(names(x), ext))
    names(dfiles) <- names(x)
    for(tn in names(x)){
-      if(is.matrix(x[[tn]])){
-         tw <- dplyr::as_tibble(x[[tn]], rownames="___ROWNAMES___")
+      if(inherits(x[[tn]], c("dgCMatrix", "dgTMatrix"))){
+         rntw <- rownames(x[[tn]])
+         cntw <- colnames(x[[tn]])
+         tw <- dplyr::as_tibble(Matrix::summary(x[[tn]]))
+         readr::write_delim(
+            dplyr::tibble(h=c(
+               "%%MatrixMarket matrix coordinate real general",
+               paste0("%%Rownames: ", paste(rntw, collapse="\t")),
+               paste0("%%Colnames: ", paste(cntw, collapse="\t")),
+               paste(length(rntw), length(cntw), nrow(tw), sep=" ")
+            )),
+            file=dfiles[tn],
+            delim="\t",
+            quote="none",
+            col_names=FALSE
+         )
+         readr::write_delim(
+            tw, file=dfiles[tn],
+            delim="\t",
+            col_names=FALSE,
+            append=TRUE
+         )
       }else{
-         tw <- x[[tn]]
+         if(inherits(x[[tn]], c("matrix", "Matrix"))){
+            tw <- dplyr::as_tibble(
+               as.matrix(x[[tn]]), rownames="___ROWNAMES___"
+            )
+         }else{
+            tw <- x[[tn]]
+         }
+         readr::write_delim(
+            tw, file=dfiles[tn],
+            delim=rp$delim,
+            na=rp$na,
+            quote="all", escape="double"
+         )
       }
-      readr::write_delim(
-         tw, file=dfiles[tn],
-         delim=rp$delim,
-         na=rp$na,
-         quote="all", escape="double"
-      )
    }
    
    ## Return fileMDB ----
@@ -800,68 +845,133 @@ filter_mdb_matrix.memoMDB <- function(x, tableName, ...){
    dm <- data_model(x)
    for(tn in names(x)){
       if(ReDaMoR::is.MatrixModel(dm[[tn]])){
-         if(ncol(x[[tn]]) > CH_MAX_COL && nrow(x[[tn]]) < ncol(x[[tn]])){
-            tw <- x[[tn]]
-            gc()
-            transposed <- TRUE
-            scn <- sort(rownames(tw))
-            colList <- seq(1, nrow(tw), by=CH_MAX_COL)
-            colList <- lapply(
-               colList,
-               function(i){
-                  scn[i:min(i+CH_MAX_COL-1, nrow(tw))]
-               }
+         
+         if(inherits(x[[tn]], c("dgCMatrix", "dgTMatrix"))){
+
+            ## Sparse matrix ----
+            
+            ## Rownames and colnames
+            rowTable <- dplyr::tibble(
+               i=1:nrow(x[[tn]]),
+               name=rownames(x[[tn]])
             )
-         }else{
-            tw <- x[[tn]]
-            transposed <- FALSE
-            scn <- sort(colnames(tw))
-            colList <- seq(1, ncol(tw), by=CH_MAX_COL)
-            colList <- lapply(
-               colList,
-               function(i){
-                  scn[i:min(i+CH_MAX_COL-1, ncol(tw))]
-               }
+            colTable <- dplyr::tibble(
+               j=1:ncol(x[[tn]]),
+               name=colnames(x[[tn]])
             )
-         }
-         names(colList) <- uuid::UUIDgenerate(n=length(colList))
-         nullable <- dm[[tn]]$fields %>% 
-            dplyr::filter(!.data$type %in% c("column", "row")) %>% 
-            dplyr::pull("nullable")
-         vtype <- dm[[tn]]$fields %>% 
-            dplyr::filter(!.data$type %in% c("column", "row")) %>% 
-            dplyr::pull("type")
-         for(stn in names(colList)){
-            if(transposed){
-               stw <- tw[colList[[stn]], , drop=FALSE] %>% 
-                  t() %>% 
-                  dplyr::as_tibble(rownames="___COLNAMES___")
-            }else{
-               stw <- tw[, colList[[stn]], drop=FALSE] %>% 
-                  dplyr::as_tibble(rownames="___ROWNAMES___")
-            }
-            nulcol <- NULL
-            if(nullable){
-               nulcol <- colList[[stn]]
-            }
+            modTable <- dplyr::tibble(
+               table=uuid::UUIDgenerate(n=3),
+               info=c("rows", "columns", "values")
+            )
             write_MergeTree(
                con=con,
                dbName=dbName,
-               tableName=stn,
-               value=stw,
-               rtypes=c("character", rep(vtype, ncol(stw) - 1)) %>% 
-                  magrittr::set_names(colnames(stw)),
-               nullable=nulcol,
-               sortKey=colnames(stw)[1]
+               tableName=modTable$table[which(modTable$info=="rows")],
+               value=rowTable,
+               rtypes=c("i"="integer", name="character"),
+               nullable=NULL,
+               sortKey="i"
             )
-            rm(stw)
-            gc()
+            write_MergeTree(
+               con=con,
+               dbName=dbName,
+               tableName=modTable$table[which(modTable$info=="columns")],
+               value=colTable,
+               rtypes=c("j"="integer", name="character"),
+               nullable=NULL,
+               sortKey="j"
+            )
+            
+            ## Values
+            valTable <- modTable$table[which(modTable$info=="values")]
+            tw <- dplyr::as_tibble(Matrix::summary(x[[tn]]))
+            write_MergeTree(
+               con=con,
+               dbName=dbName,
+               tableName=valTable,
+               value=tw,
+               rtypes=c("i"="integer", "j"="integer", "x"="numeric"),
+               nullable=NULL,
+               sortKey=c("i", "j")
+            )
+            
+            ## Reference table
+            ch_insert(
+               con=con, dbName=dbName, tableName=tn,
+               value=modTable
+            )
+            
+         }else{
+            
+            ## Matrix ----
+         
+            if(ncol(x[[tn]]) > CH_MAX_COL && nrow(x[[tn]]) < ncol(x[[tn]])){
+               tw <- x[[tn]]
+               gc()
+               transposed <- TRUE
+               scn <- sort(rownames(tw))
+               colList <- seq(1, nrow(tw), by=CH_MAX_COL)
+               colList <- lapply(
+                  colList,
+                  function(i){
+                     scn[i:min(i+CH_MAX_COL-1, nrow(tw))]
+                  }
+               )
+            }else{
+               tw <- x[[tn]]
+               transposed <- FALSE
+               scn <- sort(colnames(tw))
+               colList <- seq(1, ncol(tw), by=CH_MAX_COL)
+               colList <- lapply(
+                  colList,
+                  function(i){
+                     scn[i:min(i+CH_MAX_COL-1, ncol(tw))]
+                  }
+               )
+            }
+            names(colList) <- uuid::UUIDgenerate(n=length(colList))
+            nullable <- dm[[tn]]$fields %>% 
+               dplyr::filter(!.data$type %in% c("column", "row")) %>% 
+               dplyr::pull("nullable")
+            vtype <- dm[[tn]]$fields %>% 
+               dplyr::filter(!.data$type %in% c("column", "row")) %>% 
+               dplyr::pull("type")
+            for(stn in names(colList)){
+               if(transposed){
+                  stw <- tw[colList[[stn]], , drop=FALSE] %>% 
+                     t() %>% 
+                     dplyr::as_tibble(rownames="___COLNAMES___")
+               }else{
+                  stw <- tw[, colList[[stn]], drop=FALSE] %>% 
+                     dplyr::as_tibble(rownames="___ROWNAMES___")
+               }
+               nulcol <- NULL
+               if(nullable){
+                  nulcol <- colList[[stn]]
+               }
+               write_MergeTree(
+                  con=con,
+                  dbName=dbName,
+                  tableName=stn,
+                  value=stw,
+                  rtypes=c("character", rep(vtype, ncol(stw) - 1)) %>% 
+                     magrittr::set_names(colnames(stw)),
+                  nullable=nulcol,
+                  sortKey=colnames(stw)[1]
+               )
+               rm(stw)
+               gc()
+            }
+            ch_insert(
+               con=con, dbName=dbName, tableName=tn,
+               value=dplyr::tibble(table=names(colList), info="values")
+            )
+            
          }
-         ch_insert(
-            con=con, dbName=dbName, tableName=tn,
-            value=dplyr::tibble(table=names(colList))
-         )
-      }else{
+      }else{{
+         
+         ## Table ----
+         
          toWrite <- x[[tn]]
          b64_fields <- dm[[tn]]$fields %>% 
             dplyr::filter(.data$type=="base64") %>% 
@@ -881,7 +991,7 @@ filter_mdb_matrix.memoMDB <- function(x, tableName, ...){
             )
          }
          ch_insert(con=con, dbName=dbName, tableName=tn, value=toWrite)
-      }
+      }}
    }
 }
 
@@ -950,7 +1060,7 @@ filter_mdb_matrix.memoMDB <- function(x, tableName, ...){
                tm1=dm[[ntn]], tm2=dm[[tn]]
             )
             
-            if(is.matrix(toAdd)){
+            if(inherits(toAdd, c("matrix", "Matrix"))){
                d[[ntn]] <<- all[[ntn]][
                   c(rownames(d[[ntn]]), rownames(toAdd)),
                   c(colnames(d[[ntn]]), colnames(toAdd)),
@@ -1006,7 +1116,7 @@ filter_mdb_matrix.memoMDB <- function(x, tableName, ...){
                ),
                tm1=dataModel[[ntn]], tm2=dataModel[[tn]]
             )
-            if(is.matrix(nv)){
+            if(inherits(nv, c("matrix", "Matrix"))){
                if(
                   nrow(nv) < nrow(toRet[[ntn]]) ||
                   ncol(nv) < ncol(toRet[[ntn]])
@@ -1032,7 +1142,10 @@ filter_mdb_matrix.memoMDB <- function(x, tableName, ...){
 .mdjoin <- function(d1, d2, by, tm1, tm2){
    
    ## Two tibbles ----
-   if(!is.matrix(d1) && !is.matrix(d2)){
+   if(
+      !inherits(d1, c("matrix", "Matrix")) &&
+      !inherits(d2, c("matrix", "Matrix"))
+   ){
       return(dplyr::semi_join(d1, d2, by=by))
    }
    
@@ -1065,9 +1178,9 @@ filter_mdb_matrix.memoMDB <- function(x, tableName, ...){
    }
    
    ## A matrix to filter ----
-   if(is.matrix(d1)){
+   if(inherits(d1, c("matrix", "Matrix"))){
       d1val <-  getfvalues(d1, names(by), tm1)
-      if(is.matrix(d2)){
+      if(inherits(d2, c("matrix", "Matrix"))){
          d2val <-  getfvalues(d2, as.character(by), tm2)
       }else{
          d2val <- lapply(as.character(by), function(f){d2[[f]]}) %>% 
@@ -1080,14 +1193,14 @@ filter_mdb_matrix.memoMDB <- function(x, tableName, ...){
             if(nrow(d1)>0){
                rowToTake <- 1:nrow(d1)
             }else{
-               rowToTake <- c()
+               rowToTake <- integer(0)
             }
          }
          if(attr(d1val[[fi]], "f")=="row"){
             if(ncol(d1)>0){
                colToTake <- 1:ncol(d1)
             }else{
-               colToTake <- c()
+               colToTake <- integer(0)
             }
             rowToTake <- toTake
          }
@@ -1104,7 +1217,7 @@ filter_mdb_matrix.memoMDB <- function(x, tableName, ...){
    }
    
    ## A tibble to filter with a matrix ----
-   if(is.matrix(d2)){
+   if(inherits(d2, c("matrix", "Matrix"))){
       d2val <-  getfvalues(d2, as.character(by), tm2)
       toRet <- d1
       for(fi in 1:length(by)){

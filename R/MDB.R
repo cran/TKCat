@@ -322,13 +322,26 @@ add_collection_member <- function(
    toAdd$resource <- resource
    toAdd$mid <- as.integer(mid)
    toAdd$table <- table
+   toAdd <- dplyr::select(
+      toAdd,
+      "collection", "cid", "resource", "mid", "table",
+      "field", "static", "value", "type"
+   )
+   if(!is.null(cm)){
+      toAddf <- dplyr::anti_join(
+         toAdd, cm,
+         by=c("collection", "table", "field", "value")
+      )
+      if(nrow(toAddf)==0){
+         warning(
+            "This member is already recorded: it won't be added nor modified"
+         )
+         toAdd <- NULL
+      }
+   }
    cm <- rbind(
       cm,
-      dplyr::select(
-         toAdd,
-         "collection", "cid", "resource", "mid", "table",
-         "field", "static", "value", "type"
-      )
+      toAdd
    )
    toRet <- x
    collection_members(toRet) <- cm
@@ -744,7 +757,12 @@ merge.MDB <- function(
             },
             ...
          )
-         for(cn in colnames(nrt)){
+         
+         cc <- unlist(lapply(nrt, function(x) class(x)[1]))
+         fcc <- dplyr::mutate(tm$fields, cc=cc[.data$name])
+         wc <- dplyr::filter(fcc, .data$type!=.data$cc) %>% dplyr::pull("name")
+         
+         for(cn in wc){
             nrt[,cn] <- ReDaMoR::as_type(
                dplyr::pull(nrt, !!cn),
                tm$fields$type[which(tm$fields$name==cn)]

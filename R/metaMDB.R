@@ -428,7 +428,7 @@ data_tables.metaMDB <- function(x, ..., skip=0, n_max=Inf){
             x$relationalTables[lToTake],
             function(d){
                if(skip >= nrow(d)){
-                  return(d[c(),])
+                  return(d[integer(0),])
                }
                n <- skip+1
                m <- min(nrow(d), n_max+skip)
@@ -865,7 +865,6 @@ filter_mdb_matrix.metaMDB <- function(x, tableName, ...){
    tmdb <- lapply(mdbs, function(y) tableName %in% names(y)) %>%
       unlist() %>% 
       which()
-   print(tmdb)
    return(filter_mdb_matrix(x=mdbs[[tmdb]], tableName=tableName, ...))
 }
 

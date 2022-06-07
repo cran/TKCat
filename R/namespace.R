@@ -2,13 +2,13 @@
 #' @import dplyr
 #' @import ReDaMoR
 #' @import DBI
-#' @import RClickhouse
 #' @import shiny
 #' @import shinydashboard
 #' @import visNetwork
 #' @import future
 #' @import promises
 #' 
+#' @importFrom ClickHouseHTTP ClickHouseHTTP
 #' @importFrom rlang .data enquo
 #' @importFrom tidyselect eval_select vars_pull eval_rename
 #' 
@@ -25,5 +25,8 @@
 #' @importFrom xml2 read_xml xml_children xml_name xml_replace write_xml
 #' 
 #' @importFrom uuid UUIDgenerate
+#' 
+#' 
+#' @importFrom Matrix summary sparseMatrix drop0
 #' 
 NULL

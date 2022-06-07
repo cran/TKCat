@@ -185,6 +185,10 @@ get_hosts.chMDB <- function(x, ...){
 #' using the table names from the data model. If FALSE, the user must know the
 #' table instance name in the remote database. By default, autoalias is set
 #' to TRUE when using a non-current instance of the database.
+#' @param ... Additional parameters for [dbGetQuery()] function.
+#' For the ClickHouseHTTP DBI, `format` can be set to "Arrow" (default) or
+#' "TabSeparatedWithNamesAndTypes"
+#' (see [ClickHouseHTTP::dbSendQuery,ClickHouseHTTPConnection,character-method])
 #' 
 #' @rdname get_query
 #' @method get_query chMDB
@@ -194,8 +198,8 @@ get_hosts.chMDB <- function(x, ...){
 get_query.chMDB <- function(x, query, autoalias=!is_current_chMDB(x), ...){
    con <- unclass(x)$tkcon$chcon
    n <- unclass(x)$dbInfo$name
-   RClickhouse::dbSendQuery(con, sprintf("USE `%s`", n))
-   on.exit(RClickhouse::dbSendQuery(con, "USE default"))
+   DBI::dbSendQuery(con, sprintf("USE `%s`", n))
+   on.exit(DBI::dbSendQuery(con, "USE default"))
    if(is.na(autoalias)){
       autoalias <- FALSE
    }
@@ -292,19 +296,24 @@ get_MDB.chTKCat <- function(x, dbName, timestamp=NA, check=TRUE, n_max=10, ...){
    }
    dbm <- list(
       tables=get_query(
-         x, tsSelect("___Tables___")
+         x, tsSelect("___Tables___"),
+         format="Arrow"
       ),
       fields=get_query(
-         x, tsSelect("___Fields___")
+         x, tsSelect("___Fields___"),
+         format="Arrow"
       ),
       primaryKeys=get_query(
-         x, tsSelect("___PrimaryKeys___")
+         x, tsSelect("___PrimaryKeys___"),
+         format="TabSeparatedWithNamesAndTypes"
       ),
       foreignKeys=get_query(
-         x, tsSelect("___ForeignKeys___")
+         x, tsSelect("___ForeignKeys___"),
+         format="TabSeparatedWithNamesAndTypes"
       ),
       indexes=get_query(
-         x, tsSelect("___Indexes___")
+         x, tsSelect("___Indexes___"),
+         format="TabSeparatedWithNamesAndTypes"
       )
    )
    dbm$fields$nullable <- as.logical(dbm$fields$nullable)
@@ -314,7 +323,8 @@ get_MDB.chTKCat <- function(x, dbName, timestamp=NA, check=TRUE, n_max=10, ...){
    
    ## DB information ----
    dbInfo <- as.list(get_query(
-      x, tsSelect("___MDB___")
+      x, tsSelect("___MDB___"),
+      format="Arrow"
    ))
    dbInfo <- c(dbInfo, list("timestamp"=as.POSIXct(timestamp)))
 
@@ -333,7 +343,8 @@ get_MDB.chTKCat <- function(x, dbName, timestamp=NA, check=TRUE, n_max=10, ...){
    
    ## Collection members ----
    collectionMembers <- get_query(
-      x, tsSelect("___CollectionMembers___")
+      x, tsSelect("___CollectionMembers___"),
+      format="TabSeparatedWithNamesAndTypes"
    ) %>%
       dplyr::mutate(
          resource=dbName,
@@ -901,9 +912,9 @@ data_tables.chMDB <- function(x, ..., skip=0, n_max=Inf){
    if(length(x)==0){
       return(list())
    }
-   if(is.infinite(n_max)){
-      n_max <- max(count_records(x, ...))
-   }
+   # if(is.infinite(n_max)){
+   #    n_max <- max(count_records(x, ...))
+   # }
    m <- data_model(x)
    toTake <- tidyselect::eval_select(rlang::expr(c(...)), x)
    if(length(toTake)==0){
@@ -915,13 +926,21 @@ data_tables.chMDB <- function(x, ..., skip=0, n_max=Inf){
    toRet <- lapply(
       names(toTake),
       function(tn){
-         .get_ch_mtable(
+         d <- .get_ch_mtable(
             x,
             tablePath=toTake[tn], tableModel=m[[tn]],
             skip=skip, n_max=n_max
          )
+         return(d)
       }
    )
+   toRet <- lapply(toRet, function(d){
+      if(nrow(d)==0){
+         d
+      }else{
+         d[1:nrow(d),]
+      }
+   })
    names(toRet) <- names(toTake)
    return(toRet)
 }
@@ -1224,22 +1243,110 @@ as_fileMDB.chMDB <- function(
    names(dfiles) <- names(x)
    for(tn in names(x)){
       ddim <- dims(x, dplyr::all_of(tn))
-      r <- 0
-      toWrite <- data_tables(x, dplyr::all_of(tn), skip=r, n_max=by)[[1]]
-      while(!is.null(toWrite) && nrow(toWrite)>0){
-         if(is.matrix(toWrite)){
-            toWrite <- dplyr::as_tibble(toWrite, rownames="___ROWNAMES___")
-         }
-         readr::write_delim(
-            toWrite, file=dfiles[tn],
-            delim=rp$delim,
-            na=rp$na,
-            quote="all", escape="double",
-            append=file.exists(dfiles[tn])
+      if(ddim$format=="MatrixMarket"){
+         dbti <- db_tables(x)$dbTables[tn]
+         tdb <- sub("^`", "", sub("`[.]`.*$", "", dbti))
+         
+         tquery <- sprintf("SELECT * FROM %s", dbti)
+         qr <- get_query(
+            x, tquery, autoalias=FALSE,
+            format="TabSeparatedWithNamesAndTypes"
          )
-         r <- r + nrow(toWrite)
-         message(sprintf("%s rows written over %s", r, ddim$nrow))
+         
+         rquery <- sprintf(
+            "SELECT i, name FROM %s ORDER BY i",
+            sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="rows")])
+         )
+         rowNames <- get_query(
+            x, rquery, autoalias=FALSE,
+            format="Arrow"
+         )
+         
+         cquery <- sprintf(
+            "SELECT j, name FROM %s ORDER BY j",
+            sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="columns")])
+         )
+         colNames <- get_query(
+            x, cquery, autoalias=FALSE,
+            format="Arrow"
+         )
+         
+         chTables <- list_tables(
+            unclass(x)$tkcon$chcon, dbNames=tdb
+         )
+         nv <- chTables %>% 
+            dplyr::filter(
+               .data$database==tdb &
+                  .data$name==qr$table[which(qr$info=="values")]
+            ) %>% 
+            dplyr::pull("total_rows")
+         
+         readr::write_delim(
+            dplyr::tibble(h=c(
+               "%%MatrixMarket matrix coordinate real general",
+               paste0("%%Rownames: ", paste(rowNames$name, collapse="\t")),
+               paste0("%%Colnames: ", paste(colNames$name, collapse="\t")),
+               paste(nrow(rowNames), nrow(colNames), nv, sep=" ")
+            )),
+            file=dfiles[tn],
+            delim="\t",
+            quote="none",
+            col_names=FALSE
+         )
+         
+         vtquery <- sprintf(
+            "SELECT i, j, x FROM %s ORDER BY j, i",
+            sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="values")])
+         )
+         r <- 0
+         vquery <- paste(
+            vtquery,
+            sprintf("LIMIT %s, %s", r, by)
+         )
+         toWrite <- get_query(
+            x, vquery, autoalias=FALSE,
+            format="Arrow"
+         )
+         while(!is.null(toWrite) && nrow(toWrite)>0){
+            readr::write_delim(
+               toWrite, file=dfiles[tn],
+               delim="\t",
+               quote="none",
+               col_names=FALSE,
+               append=TRUE
+            )
+            r <- r + nrow(toWrite)
+            message(sprintf("%s rows written over %s", r, nv))
+            vquery <- paste(
+               vtquery,
+               sprintf("LIMIT %s, %s", r, by)
+            )
+            toWrite <- get_query(
+               x, vquery, autoalias=FALSE,
+               format="Arrow"
+            )
+         }
+
+      }else{
+      
+         r <- 0
          toWrite <- data_tables(x, dplyr::all_of(tn), skip=r, n_max=by)[[1]]
+         while(!is.null(toWrite) && nrow(toWrite)>0){
+            if(is.matrix(toWrite)){
+               toWrite <- dplyr::as_tibble(toWrite, rownames="___ROWNAMES___")
+            }
+            readr::write_delim(
+               toWrite, file=dfiles[tn],
+               delim=rp$delim,
+               na=rp$na,
+               quote="all", escape="double",
+               append=file.exists(dfiles[tn])
+            )
+            r <- r + nrow(toWrite)
+            message(sprintf("%s rows written over %s", r, ddim$nrow))
+            toWrite <- data_tables(x, dplyr::all_of(tn), skip=r, n_max=by)[[1]]
+         }
+      
       }
    }
    
@@ -1451,113 +1558,250 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
    ## Table info ----
    dbti <- db_tables(x)$dbTables[tableName]
    dbn <- sub("^`", "", sub("`[.]`.*$", "", dbti))
-   vtype <- setdiff(
-      tableModel$fields$type,
-      c("row", "column")
-   )
-   mtables <- get_query(
+   qr <- get_query(
       x,
       sprintf("SELECT * FROM %s", dbti),
-      autoalias=FALSE
-   )$table
-   dimcol <- get_query(
-      x,
-      sprintf(
-         paste(
-            "SELECT name FROM system.columns",
-            " WHERE database='%s' AND table='%s'"
-         ),
-         dbn, mtables[1]
-      ),
-      autoalias=FALSE
-   )
-   dimcol <- intersect(
-      dimcol$name, c("___COLNAMES___", "___ROWNAMES___")
-   )
-   stopifnot(length(dimcol)==1)
-   chFields <- get_query(
-      x,
-      sprintf(
-         paste(
-            "SELECT database, table, name FROM system.columns",
-            " WHERE database='%s' AND table IN ('%s')"
-         ),
-         dbn,
-         paste(unique(mtables), collapse="', '")
-      ),
-      autoalias=FALSE
-   ) %>% 
-      dplyr::filter(.data$name!=dimcol) %>% 
-      dplyr::arrange(.data$name)
-   
-   ## Create clause and selected fields ----
-   clause <- ""
-   sel <- NA
-   frc <- c()
-   for(f in names(iFilter)){
-      ft <- tableModel$fields %>%
-         dplyr::filter(.data$name==!!f) %>%
-         dplyr::pull("type")
-      if(ft=="row"){
-         fr <- iFilter[[f]]
-         frc <- c(frc, "r")
-         if(dimcol=="___ROWNAMES___"){
-            clause <- sprintf(
-               "WHERE `___ROWNAMES___` IN ('%s')",
-               paste(iFilter[[f]],  collapse="', '")
-            )
-         }else{
-            sel <- iFilter[[f]]
-         }
-      }
-      if(ft=="column"){
-         fc <- iFilter[[f]]
-         frc <- c(frc, "c")
-         if(dimcol=="___COLNAMES___"){
-            clause <- sprintf(
-               "WHERE `___COLNAMES___` IN ('%s')",
-               paste(iFilter[[f]],  collapse="', '")
-            )
-         }else{
-            sel <- iFilter[[f]]
-         }
-      }
-   }
-   frc <- paste(sort(frc), collapse="")
-   queryTemplate <- sprintf(
-      "SELECT %s FROM `%s`.`%s`",
-      "%s", dbn, "%s"
+      autoalias=FALSE,
+      format="TabSeparatedWithNamesAndTypes"
    )
    
-   ## Build the query ----
-   i <- 1
-   if(is.na(sel[1])){
-      tquery <- paste(
-         sprintf(
-            queryTemplate, "*", mtables[[i]]
-         ),
-         clause
+   if(.is_chMM(qr)){
+      
+      ## Sparse matrix ----
+      
+      rt <- qr$table[which(qr$info=="rows")]
+      ct <- qr$table[which(qr$info=="columns")]
+      vt <- qr$table[which(qr$info=="values")]
+      
+      fr <- fc <- NULL
+      for(f in names(iFilter)){
+         ft <- tableModel$fields %>%
+            dplyr::filter(.data$name==!!f) %>%
+            dplyr::pull("type")
+         if(ft=="row"){
+            frn <- iFilter[[f]]
+            if(length(frn)==0){
+               fr <- dplyr::tibble(i=integer(0), name=character(0))
+            }else{
+               fr <- get_query(
+                  x,
+                  sprintf(
+                     paste(
+                        "SELECT i, name FROM `%s`.`%s` WHERE name in ('%s')",
+                        "ORDER BY i"
+                     ),
+                     dbn, rt, paste(frn, collapse="', '")
+                  ),
+                  autoalias=FALSE,
+                  format="Arrow"
+               )
+            }
+         }
+         if(ft=="column"){
+            fcn <- iFilter[[f]]
+            if(length(fcn)==0){
+               fc <- dplyr::tibble(j=integer(0), name=character(0))
+            }else{
+               fc <- get_query(
+                  x,
+                  sprintf(
+                     paste(
+                        "SELECT j, name FROM `%s`.`%s` WHERE name in ('%s')",
+                        "ORDER BY j"
+                     ),
+                     dbn, ct, paste(fcn, collapse="', '")
+                  ),
+                  autoalias=FALSE,
+                  format="Arrow"
+               )
+            }
+         }
+      }
+      
+      if(is.null(fr)){
+         fri <- get_query(
+            x,
+            sprintf(
+               "SELECT i, name FROM `%s`.`%s` ORDER BY i",
+               dbn, rt
+            ),
+            autoalias=FALSE,
+            format="Arrow"
+         )
+         frn <- fri$name
+      }else(
+         fri <- fr
       )
+      if(is.null(fc)){
+         fcj <- get_query(
+            x,
+            sprintf(
+               "SELECT j, name FROM `%s`.`%s` ORDER BY j",
+               dbn, ct
+            ),
+            autoalias=FALSE,
+            format="Arrow"
+         )
+         fcn <- fcj$name
+      }else{
+         fcj <- fc
+      }
+      
+      ### No value ----
+      if(!is.null(fr) && nrow(fr)==0){
+         if(!is.null(fc) && nrow(fc)==0){
+            return(Matrix::drop0(matrix(numeric(0), nrow=0, ncol=0)))
+         }else{
+            toRet <- matrix(
+               numeric(0), nrow=0, ncol=nrow(fcj),
+               dimnames=list(character(0), fcj$name)
+            )
+            return(Matrix::drop0(
+               toRet[, intersect(fcn, colnames(toRet)), drop=FALSE]
+            ))
+         }
+      }else{
+         if(!is.null(fc) && nrow(fc)==0){
+            toRet <- matrix(
+               numeric(0), nrow=nrow(fri), ncol=0,
+               dimnames=list(fri$name, character(0))
+            )
+            return(Matrix::drop0(
+               toRet[intersect(frn, rownames(toRet)), , drop=FALSE]
+            ))
+         }
+      }
+      
+      ### Value query ----
+      query <- sprintf(
+         "SELECT i, j, x FROM `%s`.`%s` WHERE %s AND %s ORDER BY j, i",
+         dbn, vt,
+         ifelse(
+            is.null(fr), "1",
+            sprintf('i in (%s)', paste(fr$i, collapse=", "))
+         ),
+         ifelse(
+            is.null(fc), "1",
+            sprintf('j in (%s)', paste(fc$j, collapse=", "))
+         )
+      )
+      toRet <- get_query(x, query, autoalias=FALSE, format="Arrow")
+      mi <- max(fri$i)
+      mj <- max(fcj$j)
+      if(!mi %in% toRet$i || !mj %in% toRet$j){
+         toRet <- rbind(
+            toRet,
+            dplyr::tibble(i=mi, j=mj, x=0)
+         )
+      }
+      fri2 <- rbind(
+         fri,
+         dplyr::tibble(
+            i=setdiff(1:mi, fri$i),
+            name="x"
+         )
+      ) %>% arrange(.data$i)
+      fcj2 <- rbind(
+         fcj,
+         dplyr::tibble(
+            j=setdiff(1:mj, fcj$j),
+            name="x"
+         )
+      ) %>% arrange(.data$j)
+      toRet <- Matrix::sparseMatrix(
+         i=toRet$i, j=toRet$j, x=toRet$x,
+         dimnames=list(fri2$name, fcj2$name)
+      )[fri$i, fcj$j, drop=FALSE]
+      return(Matrix::drop0(toRet[
+         intersect(frn, rownames(toRet)),
+         intersect(fcn, colnames(toRet)),
+         drop=FALSE
+      ]))
+      
+      
    }else{
-      totake <- chFields %>%
-         dplyr::filter(.data$table==!!mtables[[i]]) %>%
-         dplyr::pull("name") %>% 
-         intersect(sel)
-      totake <- c(dimcol, totake) %>% 
-         paste(collapse="`, `")
-      totake <- paste0("`", totake, "`")
-      tquery <- paste(
-         sprintf(
-            queryTemplate,
-            totake,
-            mtables[[i]]
-         ),
-         clause
+      
+      ## Matrix ----
+   
+      mtables <- qr$table
+      vtype <- setdiff(
+         tableModel$fields$type,
+         c("row", "column")
       )
-   }
-   query <- tquery
-   if(length(mtables)>1) for(i in 2:length(mtables)){
-      if(is.na(sel[1])){
+      dimcol <- get_query(
+         x,
+         sprintf(
+            paste(
+               "SELECT name FROM system.columns",
+               " WHERE database='%s' AND table='%s'"
+            ),
+            dbn, mtables[1]
+         ),
+         autoalias=FALSE,
+         format="TabSeparatedWithNamesAndTypes"
+      )
+      dimcol <- intersect(
+         dimcol$name, c("___COLNAMES___", "___ROWNAMES___")
+      )
+      stopifnot(length(dimcol)==1)
+      chFields <- get_query(
+         x,
+         sprintf(
+            paste(
+               "SELECT database, table, name FROM system.columns",
+               " WHERE database='%s' AND table IN ('%s')"
+            ),
+            dbn,
+            paste(unique(mtables), collapse="', '")
+         ),
+         autoalias=FALSE,
+         format="TabSeparatedWithNamesAndTypes"
+      ) %>% 
+         dplyr::filter(.data$name!=dimcol) %>% 
+         dplyr::arrange(.data$name)
+      
+      ## Create clause and selected fields ----
+      clause <- ""
+      sel <- NA
+      frc <- c()
+      for(f in names(iFilter)){
+         ft <- tableModel$fields %>%
+            dplyr::filter(.data$name==!!f) %>%
+            dplyr::pull("type")
+         if(ft=="row"){
+            fr <- iFilter[[f]]
+            frc <- c(frc, "r")
+            if(dimcol=="___ROWNAMES___"){
+               clause <- sprintf(
+                  "WHERE `___ROWNAMES___` IN ('%s')",
+                  paste(iFilter[[f]],  collapse="', '")
+               )
+            }else{
+               sel <- iFilter[[f]]
+            }
+         }
+         if(ft=="column"){
+            fc <- iFilter[[f]]
+            frc <- c(frc, "c")
+            if(dimcol=="___COLNAMES___"){
+               clause <- sprintf(
+                  "WHERE `___COLNAMES___` IN ('%s')",
+                  paste(iFilter[[f]],  collapse="', '")
+               )
+            }else{
+               sel <- iFilter[[f]]
+            }
+         }
+      }
+      frc <- paste(sort(frc), collapse="")
+      queryTemplate <- sprintf(
+         "SELECT %s FROM `%s`.`%s`",
+         "%s", dbn, "%s"
+      )
+      
+      ## Build the query ----
+      i <- 1
+      if(length(sel)==1 && is.na(sel[1])){
          tquery <- paste(
             sprintf(
                queryTemplate, "*", mtables[[i]]
@@ -1581,37 +1825,71 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
             clause
          )
       }
-      query <- paste0(
-         "SELECT * FROM (",
-         query,
-         ") FULL JOIN (",
-         tquery,
-         ') USING `',
-         dimcol,
-         '`'
+      query <- tquery
+      if(length(sel) >0 && length(mtables)>1) for(i in 2:length(mtables)){
+         if(is.na(sel[1])){
+            tquery <- paste(
+               sprintf(
+                  queryTemplate, "*", mtables[[i]]
+               ),
+               clause
+            )
+         }else{
+            totake <- chFields %>%
+               dplyr::filter(.data$table==!!mtables[[i]]) %>%
+               dplyr::pull("name") %>% 
+               intersect(sel)
+            totake <- c(dimcol, totake) %>% 
+               paste(collapse="`, `")
+            totake <- paste0("`", totake, "`")
+            tquery <- paste(
+               sprintf(
+                  queryTemplate,
+                  totake,
+                  mtables[[i]]
+               ),
+               clause
+            )
+         }
+         query <- paste0(
+            "SELECT * FROM (",
+            query,
+            ") FULL JOIN (",
+            tquery,
+            ') USING `',
+            dimcol,
+            '`'
+         )
+      }
+   
+      ## Get the results ----
+      toRet <- get_query(
+         x, query, autoalias=FALSE,
+         format="TabSeparatedWithNamesAndTypes"
       )
+      dimname <- toRet[[dimcol]]
+      toRet <- toRet[, -which(colnames(toRet)==dimcol), drop=FALSE] %>% 
+         as.matrix() %>% 
+         magrittr::set_rownames(dimname)
+      if(!vtype %in% c("Date", "POSIXct")){
+         toRet <- toRet %>% magrittr::set_class(vtype)
+      }
+      if(frc=="r"){
+         toRet <- toRet[intersect(fr, rownames(toRet)),, drop=FALSE]
+      }
+      if(frc=="c"){
+         toRet <- toRet[,intersect(fc, colnames(toRet)), drop=FALSE]
+      }
+      if(frc=="cr"){
+         toRet <- toRet[
+            intersect(fr, rownames(toRet)),
+            intersect(fc, colnames(toRet)),
+            drop=FALSE
+         ]
+      }
+      
    }
-
-   ## Get the results ----
-   toRet <- get_query(x, query, autoalias=FALSE)
-   dimname <- toRet[[dimcol]]
-   toRet <- toRet[, -which(colnames(toRet)==dimcol), drop=FALSE] %>% 
-      as.matrix() %>% 
-      magrittr::set_rownames(dimname) %>%
-      magrittr::set_class(vtype)
-   if(frc=="r"){
-      toRet <- toRet[intersect(fr, rownames(toRet)),, drop=FALSE]
-   }
-   if(frc=="c"){
-      toRet <- toRet[,intersect(fc, colnames(toRet)), drop=FALSE]
-   }
-   if(frc=="cr"){
-      toRet <- toRet[
-         intersect(fr, rownames(toRet)),
-         intersect(fc, colnames(toRet)),
-         drop=FALSE
-      ]
-   }
+   
    return(toRet)
    
 }
@@ -1623,64 +1901,191 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
    dm <- data_model(x)
    for(tn in names(x)){
       if(ReDaMoR::is.MatrixModel(dm[[tn]])){
-         nullable <- dm[[tn]]$fields %>% 
-            dplyr::filter(!.data$type %in% c("column", "row")) %>% 
-            dplyr::pull("nullable")
-         vtype <- setdiff(dm[[tn]]$fields$type, c("column", "row"))
-         tnpath <- db_tables(x)$dbTables[[tn]]
-         tndb <- sub("^`", "", sub("`[.]`.*$", "", tnpath))
-         stl <- get_query(
-            x,
-            sprintf(
-               "SELECT * FROM %s",
-               tnpath
-            ),
-            autoalias=FALSE
-         )
-         ch_insert(con=con, dbName=dbName, tableName=tn, value=stl)
-         for(stn in stl$table){
-            toWrite <- get_query(
-               x,
-               sprintf("SELECT * FROM `%s`.`%s` LIMIT 0, %s", tndb, stn, by),
-               autoalias=FALSE
+         
+         ddim <- dims(x, dplyr::all_of(tn))
+         if(ddim$format=="MatrixMarket"){
+            
+            ## Sparse matrix ----
+            
+            dbti <- db_tables(x)$dbTables[tn]
+            tdb <- sub("^`", "", sub("`[.]`.*$", "", dbti))
+            
+            tquery <- sprintf("SELECT * FROM %s", dbti)
+            qr <- get_query(
+               x, tquery, autoalias=FALSE,
+               format="TabSeparatedWithNamesAndTypes"
             )
-            nulcol <- NULL
-            if(nullable){
-               nulcol <- colnames(toWrite)[-1]
-            }
+            
+            ## Columns and rows
+            rquery <- sprintf(
+               "SELECT i, name FROM %s ORDER BY i",
+               sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="rows")])
+            )
+            rowNames <- get_query(
+               x, rquery, autoalias=FALSE,
+               format="Arrow"
+            )
+            
+            cquery <- sprintf(
+               "SELECT j, name FROM %s ORDER BY j",
+               sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="columns")])
+            )
+            colNames <- get_query(
+               x, cquery, autoalias=FALSE,
+               format="Arrow"
+            )
+            
             write_MergeTree(
                con=con,
                dbName=dbName,
-               tableName=stn,
-               value=toWrite,
-               rtypes=c("character", rep(vtype, ncol(toWrite)-1)) %>% 
-                  magrittr::set_names(colnames(toWrite)),
-               nullable=nulcol,
-               sortKey=colnames(toWrite)[1]
+               tableName=qr$table[which(qr$info=="rows")],
+               value=rowNames,
+               rtypes=c("i"="integer", name="character"),
+               nullable=NULL,
+               sortKey="i"
             )
-            r <- nrow(toWrite)
+            write_MergeTree(
+               con=con,
+               dbName=dbName,
+               tableName=qr$table[which(qr$info=="columns")],
+               value=colNames,
+               rtypes=c("j"="integer", name="character"),
+               nullable=NULL,
+               sortKey="j"
+            )
+            
+            ## Values
+            valTable <- qr$table[which(qr$info=="values")]
+            write_MergeTree(
+               con=con,
+               dbName=dbName,
+               tableName=valTable,
+               value=dplyr::tibble(
+                  i=integer(),
+                  j=integer(),
+                  x=numeric()
+               ),
+               rtypes=c("i"="integer", "j"="integer", "x"="numeric"),
+               nullable=NULL,
+               sortKey=c("i", "j")
+            )
+            chTables <- list_tables(
+               unclass(x)$tkcon$chcon, dbNames=tdb
+            )
+            nv <- chTables %>% 
+               dplyr::filter(
+                  .data$database==tdb &
+                     .data$name==valTable
+               ) %>% 
+               dplyr::pull("total_rows")
+            
+            vtquery <- sprintf(
+               "SELECT i, j, x FROM %s ORDER BY j, i",
+               sprintf('`%s`.`%s`', tdb, valTable)
+            )
+            r <- 0
+            vquery <- paste(
+               vtquery,
+               sprintf("LIMIT %s, %s", r, by)
+            )
             toWrite <- get_query(
+               x, vquery, autoalias=FALSE,
+               format="Arrow"
+            )
+            while(!is.null(toWrite) && nrow(toWrite)>0){
+               ch_insert(
+                  con=con, dbName=dbName, tableName=valTable, value=toWrite
+               )
+               r <- r + nrow(toWrite)
+               message(sprintf("%s rows written over %s", r, nv))
+               vquery <- paste(
+                  vtquery,
+                  sprintf("LIMIT %s, %s", r, by)
+               )
+               toWrite <- get_query(
+                  x, vquery, autoalias=FALSE,
+                  format="Arrow"
+               )
+            }
+            
+            ## Reference table
+            ch_insert(
+               con=con, dbName=dbName, tableName=tn,
+               value=qr
+            )
+            
+         }else{
+            
+            ## Matrix ----
+         
+            nullable <- dm[[tn]]$fields %>% 
+               dplyr::filter(!.data$type %in% c("column", "row")) %>% 
+               dplyr::pull("nullable")
+            vtype <- setdiff(dm[[tn]]$fields$type, c("column", "row"))
+            tnpath <- db_tables(x)$dbTables[[tn]]
+            tndb <- sub("^`", "", sub("`[.]`.*$", "", tnpath))
+            stl <- get_query(
                x,
                sprintf(
-                  "SELECT * FROM `%s`.`%s` LIMIT %s, %s",
-                  tndb, stn, r, by
+                  "SELECT * FROM %s",
+                  tnpath
                ),
-               autoalias=FALSE
+               autoalias=FALSE,
+               format="TabSeparatedWithNamesAndTypes"
             )
-            while(nrow(toWrite)>0){
-               ch_insert(con=con, dbName=dbName, tableName=stn, value=toWrite)
-               r <- r + nrow(toWrite)
+            ch_insert(con=con, dbName=dbName, tableName=tn, value=stl)
+            for(stn in stl$table){
+               toWrite <- get_query(
+                  x,
+                  sprintf("SELECT * FROM `%s`.`%s` LIMIT 0, %s", tndb, stn, by),
+                  autoalias=FALSE,
+                  format="TabSeparatedWithNamesAndTypes"
+               )
+               nulcol <- NULL
+               if(nullable){
+                  nulcol <- colnames(toWrite)[-1]
+               }
+               write_MergeTree(
+                  con=con,
+                  dbName=dbName,
+                  tableName=stn,
+                  value=toWrite,
+                  rtypes=c("character", rep(vtype, ncol(toWrite)-1)) %>% 
+                     magrittr::set_names(colnames(toWrite)),
+                  nullable=nulcol,
+                  sortKey=colnames(toWrite)[1]
+               )
+               r <- nrow(toWrite)
                toWrite <- get_query(
                   x,
                   sprintf(
                      "SELECT * FROM `%s`.`%s` LIMIT %s, %s",
                      tndb, stn, r, by
                   ),
-                  autoalias=FALSE
+                  autoalias=FALSE,
+                  format="TabSeparatedWithNamesAndTypes"
                )
+               while(nrow(toWrite)>0){
+                  ch_insert(
+                     con=con, dbName=dbName, tableName=stn, value=toWrite
+                  )
+                  r <- r + nrow(toWrite)
+                  toWrite <- get_query(
+                     x,
+                     sprintf(
+                        "SELECT * FROM `%s`.`%s` LIMIT %s, %s",
+                        tndb, stn, r, by
+                     ),
+                     autoalias=FALSE,
+                     format="TabSeparatedWithNamesAndTypes"
+                  )
+               }
             }
          }
-      }else{
+      }else{{
+         
+         ## Table ----
+         
          toWrite <- data_tables(x, dplyr::all_of(tn), skip=0, n_max=by)[[1]]
          r <- nrow(toWrite)
          while(nrow(toWrite)>0){
@@ -1688,8 +2093,13 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
             toWrite <- data_tables(x, dplyr::all_of(tn), skip=r, n_max=by)[[1]]
             r <- r + nrow(toWrite)
          }
-      }
+      }}
    }
+}
+
+.is_chMM <- function(d){
+   identical(sort(colnames(d)), sort(c("info", "table"))) &&
+      identical(sort(d$info), sort(c("columns", "rows", "values")))
 }
 
 .get_ch_mtable <- function(
@@ -1699,6 +2109,7 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
    skip=0, n_max=Inf
 ){
    
+   getsubtab <- skip > 0 || !is.infinite(n_max)
    if(is.infinite(n_max)){
       n_max <- "18446744073709551615"
    }
@@ -1707,102 +2118,177 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
    if(ReDaMoR::is.MatrixModel(tableModel)){
       query <- "SELECT * FROM %s"
       tquery <- sprintf(query, dbti)
-      qr <- get_query(x, tquery, autoalias=FALSE)
-      toRet <- list()
-      vtype <- setdiff(
-         tableModel$fields$type,
-         c("row", "column")
+      qr <- get_query(
+         x, tquery, autoalias=FALSE,
+         format="TabSeparatedWithNamesAndTypes"
       )
-      dimcol <- get_query(
-         x,
-         sprintf(
-            paste(
-               "SELECT name FROM system.columns",
-               " WHERE database='%s' AND table='%s'"
-            ),
-            tdb, qr$table[1]
-         ),
-         autoalias=FALSE
-      )
-      dimcol <- intersect(
-         dimcol$name, c("___COLNAMES___", "___ROWNAMES___")
-      )
-      stopifnot(length(dimcol)==1)
-      chFields <- get_query(
-         x,
-         sprintf(
-            paste(
-               "SELECT database, table, name FROM system.columns",
-               " WHERE database='%s' AND table IN ('%s')"
-            ),
-            tdb,
-            paste(unique(qr$table), collapse="', '")
-         ),
-         autoalias=FALSE
-      ) %>% 
-         dplyr::filter(.data$name!=dimcol) %>% 
-         dplyr::arrange(.data$name)
-      if(dimcol=="___ROWNAMES___"){
-         for(st in unique(chFields$table)){
-            stquery <- sprintf(
-               paste(query, 'ORDER BY %s'),
-               sprintf('`%s`.`%s`', tdb, st),
-               dimcol
+      
+      if(.is_chMM(qr)){
+         
+         ## Sparse matrix ----
+         if(getsubtab){
+            warning(
+               "Be careful when using skip and n_max parameters: ",
+               "Subsetting a sparse matrix from clickhouse may return ",
+               "inconsistent 0 values"
             )
-            stquery <- paste(
-               stquery,
-               sprintf("LIMIT %s, %s", skip, n_max)
-            )
-            stqr <- get_query(x, stquery, autoalias=FALSE)
-            dimname <- stqr[[dimcol]]
-            stopifnot(
-               !any(duplicated(dimname)),
-               ncol(stqr) > 1
-            )
-            toAdd <- stqr[, -1, drop=FALSE] %>% 
-               as.matrix() %>% 
-               magrittr::set_rownames(dimname)
-            toRet <- c(toRet, list(toAdd))
          }
-         toRet <- do.call(cbind, toRet) %>%
-            magrittr::set_class(vtype)
-         toRet <- toRet[, sort(colnames(toRet))]
+         
+         vquery <- sprintf(
+            "SELECT i, j, x FROM %s ORDER BY j, i",
+            sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="values")])
+         )
+         vquery <- paste(
+            vquery,
+            sprintf("LIMIT %s, %s", skip, n_max)
+         )
+         values <- get_query(
+            x, vquery, autoalias=FALSE,
+            format="Arrow"
+         )
+         
+         rToTake <- max(values$i)
+         rquery <- sprintf(
+            "SELECT i, name FROM %s WHERE i <= %s ORDER BY i",
+            sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="rows")]),
+            rToTake
+         )
+         rowNames <- get_query(
+            x, rquery, autoalias=FALSE,
+            format="Arrow"
+         )
+         
+         cToTake <- max(values$j)
+         cquery <- sprintf(
+            "SELECT j, name FROM %s WHERE j <= %s ORDER BY j",
+            sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="columns")]),
+            cToTake
+         )
+         colNames <- get_query(
+            x, cquery, autoalias=FALSE,
+            format="Arrow"
+         )
+         
+         toRet <- Matrix::sparseMatrix(
+            i=as.integer(values$i), j=as.integer(values$j), x=values$x,
+            dimnames=list(rowNames$name, colNames$name)
+         )
+         
       }else{
-         if(skip >= nrow(chFields)){
-            return(NULL)
-         }
-         chFields <- chFields[(skip + 1):nrow(chFields),]
-         chFields <- chFields[1:min(nrow(chFields), n_max),]
-         for(st in unique(chFields$table)){
-            stquery <- sprintf(
-               'SELECT `%s` FROM %s ORDER BY %s',
+      
+         ## Matrix ----
+         
+         toRet <- list()
+         vtype <- setdiff(
+            tableModel$fields$type,
+            c("row", "column")
+         )
+         dimcol <- get_query(
+            x,
+            sprintf(
                paste(
-                  c(
-                     dimcol,
-                     chFields$name[which(chFields$table==st)]
-                  ),
-                  collapse='`, `'
+                  "SELECT name FROM system.columns",
+                  " WHERE database='%s' AND table='%s'"
                ),
-               sprintf('`%s`.`%s`', tdb, st),
-               dimcol
-            )
-            stqr <- get_query(x, stquery, autoalias=FALSE)
-            dimname <- stqr[[dimcol]]
-            stopifnot(
-               !any(duplicated(dimname)),
-               ncol(stqr) > 1
-            )
-            toAdd <- stqr[, -1, drop=FALSE] %>% 
-               as.matrix() %>% 
-               magrittr::set_rownames(dimname)
-            toRet <- c(toRet, list(toAdd))
+               tdb, qr$table[1]
+            ),
+            autoalias=FALSE,
+            format="TabSeparatedWithNamesAndTypes"
+         )
+         dimcol <- intersect(
+            dimcol$name, c("___COLNAMES___", "___ROWNAMES___")
+         )
+         stopifnot(length(dimcol)==1)
+         chFields <- get_query(
+            x,
+            sprintf(
+               paste(
+                  "SELECT database, table, name FROM system.columns",
+                  " WHERE database='%s' AND table IN ('%s')"
+               ),
+               tdb,
+               paste(unique(qr$table), collapse="', '")
+            ),
+            autoalias=FALSE,
+            format="TabSeparatedWithNamesAndTypes"
+         ) %>% 
+            dplyr::filter(.data$name!=dimcol) %>% 
+            dplyr::arrange(.data$name)
+         if(dimcol=="___ROWNAMES___"){
+            for(st in unique(chFields$table)){
+               stquery <- sprintf(
+                  paste(query, 'ORDER BY %s'),
+                  sprintf('`%s`.`%s`', tdb, st),
+                  dimcol
+               )
+               stquery <- paste(
+                  stquery,
+                  sprintf("LIMIT %s, %s", skip, n_max)
+               )
+               stqr <- get_query(
+                  x, stquery, autoalias=FALSE,
+                  format="TabSeparatedWithNamesAndTypes"
+               )
+               dimname <- stqr[[dimcol]]
+               stopifnot(
+                  !any(duplicated(dimname)),
+                  ncol(stqr) > 1
+               )
+               toAdd <- stqr[, -1, drop=FALSE] %>% 
+                  as.matrix() %>% 
+                  magrittr::set_rownames(dimname)
+               toRet <- c(toRet, list(toAdd))
+            }
+            toRet <- do.call(cbind, toRet)
+            if(!vtype %in% c("Date", "POSIXct")){
+               toRet <- magrittr::set_class(toRet, vtype)
+            }
+            toRet <- toRet[, sort(colnames(toRet))]
+         }else{
+            if(skip >= nrow(chFields)){
+               return(NULL)
+            }
+            chFields <- chFields[(skip + 1):nrow(chFields),]
+            chFields <- chFields[1:min(nrow(chFields), n_max),]
+            for(st in unique(chFields$table)){
+               stquery <- sprintf(
+                  'SELECT `%s` FROM %s ORDER BY %s',
+                  paste(
+                     c(
+                        dimcol,
+                        chFields$name[which(chFields$table==st)]
+                     ),
+                     collapse='`, `'
+                  ),
+                  sprintf('`%s`.`%s`', tdb, st),
+                  dimcol
+               )
+               stqr <- get_query(
+                  x, stquery, autoalias=FALSE,
+                  format="TabSeparatedWithNamesAndTypes"
+               )
+               dimname <- stqr[[dimcol]]
+               stopifnot(
+                  !any(duplicated(dimname)),
+                  ncol(stqr) > 1
+               )
+               toAdd <- stqr[, -1, drop=FALSE] %>% 
+                  as.matrix() %>% 
+                  magrittr::set_rownames(dimname)
+               toRet <- c(toRet, list(toAdd))
+            }
+            toRet <- do.call(cbind, toRet) %>%
+               t()
+            if(!vtype %in% c("Date", "POSIXct")){
+               toRet <- magrittr::set_class(toRet, vtype)
+            }
+            toRet <- toRet[sort(rownames(toRet)),]
          }
-         toRet <- do.call(cbind, toRet) %>%
-            t() %>%
-            magrittr::set_class(vtype)
-         toRet <- toRet[sort(rownames(toRet)),]
       }
-   }else{
+   }else{{
+      
+      ## Table ----
+      
       query <- "SELECT * FROM %s ORDER BY %s LIMIT %s, %s"
       toRet <- get_query(
          x,
@@ -1812,17 +2298,25 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
             .get_tm_sortKey(tableModel, quoted=TRUE),
             skip, n_max
          ),
-         autoalias=FALSE
+         autoalias=FALSE,
+         format=ifelse(
+            "base64" %in% tableModel$fields$type | nrow(tableModel$fields) < 50,
+            "Arrow",
+            "TabSeparatedWithNamesAndTypes"
+         )
       )
       attr(toRet, "data.type") <- NULL
-      for (cn in colnames(toRet)) {
+      cc <- unlist(lapply(toRet, function(x) class(x)[1]))
+      fcc <- dplyr::mutate(tableModel$fields, cc=cc[.data$name])
+      wc <- dplyr::filter(fcc, .data$type!=.data$cc) %>% dplyr::pull("name")
+      for (cn in wc) {
          toRet[, cn] <- ReDaMoR::as_type(
             dplyr::pull(toRet, !!cn),
             dplyr::filter(tableModel$fields, .data$name==!!cn) %>%
                dplyr::pull("type")
          )
       }
-   }
+   }}
    return(toRet)
 }
 
@@ -1843,48 +2337,85 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
          ),
          tdb
       ),
-      autoalias=FALSE
+      autoalias=FALSE,
+      format="TabSeparatedWithNamesAndTypes"
    )
    
    if(ReDaMoR::is.MatrixModel(tableModel)){
       dbmt <- tablePath
       query <- "SELECT * FROM %s"
       tquery <- sprintf(query, dbmt)
-      qr <- get_query(x, tquery, autoalias=FALSE)
-      nr <- chTables %>% 
-         dplyr::filter(
-            .data$database==tdb & .data$name==qr$table[1]
-         ) %>% 
-         dplyr::pull("total_rows")
-      tfields <- chFields %>% 
-         dplyr::filter(
-            .data$database==tdb,
-            .data$table %in% qr$table
-         )
-      if("___ROWNAMES___" %in% tfields$name){
-         if("___COLNAMES___" %in% tfields$name){
-            stop(paste0(tn, ": Ambiguous matrix format"))
-         }else{
-            transposed=FALSE
-         }
-      }else{
-         if("___COLNAMES___" %in% tfields$name){
-            transposed=TRUE
-         }else{
-            stop(paste0(tn, ": Wrong matrix format"))
-         }
-      }
-      nc <- nrow(tfields) - nrow(qr)
-      
-      toRet <- dplyr::tibble(
-         format="matrix",
-         ncol=ifelse(transposed, nr, nc),
-         nrow=ifelse(transposed, nc, nr),
-         records=nc*nr,
-         transposed=transposed
+      qr <- get_query(
+         x, tquery, autoalias=FALSE,
+         format="TabSeparatedWithNamesAndTypes"
       )
       
-   }else{
+      if(.is_chMM(qr)){
+         
+         ## Sparse matrix ----
+         
+         nr <- chTables %>% 
+            dplyr::filter(
+               .data$database==tdb &
+                  .data$name==qr$table[which(qr$info=="rows")]
+            ) %>% 
+            dplyr::pull("total_rows")
+         nc <- chTables %>% 
+            dplyr::filter(
+               .data$database==tdb &
+                  .data$name==qr$table[which(qr$info=="columns")]
+            ) %>% 
+            dplyr::pull("total_rows")
+         toRet <- dplyr::tibble(
+            format="MatrixMarket",
+            ncol=nc,
+            nrow=nr,
+            records=as.numeric(nc) * as.numeric(nr),
+            transposed=FALSE
+         )
+         
+      }else{
+         
+         ## Matrix ----
+      
+         nr <- chTables %>% 
+            dplyr::filter(
+               .data$database==tdb & .data$name==qr$table[1]
+            ) %>% 
+            dplyr::pull("total_rows")
+         tfields <- chFields %>% 
+            dplyr::filter(
+               .data$database==tdb,
+               .data$table %in% qr$table
+            )
+         if("___ROWNAMES___" %in% tfields$name){
+            if("___COLNAMES___" %in% tfields$name){
+               stop(paste0(tn, ": Ambiguous matrix format"))
+            }else{
+               transposed=FALSE
+            }
+         }else{
+            if("___COLNAMES___" %in% tfields$name){
+               transposed=TRUE
+            }else{
+               stop(paste0(tn, ": Wrong matrix format"))
+            }
+         }
+         nc <- nrow(tfields) - nrow(qr)
+         
+         toRet <- dplyr::tibble(
+            format="matrix",
+            ncol=ifelse(transposed, nr, nc),
+            nrow=ifelse(transposed, nc, nr),
+            records=as.numeric(nc) * as.numeric(nr),
+            transposed=transposed
+         )
+      
+      }
+      
+   }else{{
+      
+      ## Table ----
       
       toRet <- dplyr::tibble(
          format="table",
@@ -1899,7 +2430,7 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
             records=.data$nrow,
             transposed=FALSE
          )
-   }
+   }}
    
    return(toRet)
 
@@ -1939,72 +2470,147 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
       query <- "SELECT * FROM %s"
       tdb <- sub("^`", "", sub("`[.]`.*$", "", dbti))
       tquery <- sprintf(query, dbti)
-      qr <- get_query(x, tquery, autoalias=FALSE)
-      vtype <- setdiff(
-         tableModel$fields$type,
-         c("row", "column")
+      qr <- get_query(
+         x, tquery, autoalias=FALSE,
+         format="TabSeparatedWithNamesAndTypes"
       )
-      dimcol <- ifelse(dd$transposed, "___COLNAMES___", "___ROWNAMES___")
-      chFields <- get_query(
-         x,
-         sprintf(
-            paste(
-               "SELECT database, table, name FROM system.columns",
-               " WHERE database='%s' AND table IN ('%s')"
-            ),
-            tdb,
-            paste(unique(qr$table), collapse="', '")
-         ),
-         autoalias=FALSE
-      ) %>% 
-         dplyr::filter(.data$name!=dimcol) %>% 
-         dplyr::arrange(.data$name)
-      if(!dd$transposed){
-         chFields <- chFields[1:nc,]
-         lim <- nr
+      
+      if(.is_chMM(qr)){
+         
+         ## Sparse matrix ----
+         
+         vquery <- sprintf(
+            "SELECT i, j, x FROM %s WHERE i <= %s AND j <= %s ORDER BY j, i",
+            sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="values")]),
+            nr, nc
+         )
+         values <- get_query(
+            x, vquery, autoalias=FALSE,
+            format="Arrow"
+         )
+         ## Sparse ==> all values may be missing
+         if(nrow(values)==0){
+            values <- dplyr::tibble(
+               i=as.integer(nr),
+               j=as.integer(nc),
+               x=as.numeric(0)
+            )
+         }
+
+         rquery <- sprintf(
+            "SELECT i, name FROM %s WHERE i <= %s ORDER BY i",
+            sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="rows")]),
+            nr
+         )
+         rowNames <- get_query(
+            x, rquery, autoalias=FALSE,
+            format="Arrow"
+         )
+         
+         cquery <- sprintf(
+            "SELECT j, name FROM %s WHERE j <= %s ORDER BY j",
+            sprintf('`%s`.`%s`', tdb, qr$table[which(qr$info=="columns")]),
+            nc
+         )
+         colNames <- get_query(
+            x, cquery, autoalias=FALSE,
+            format="Arrow"
+         )
+         
+         mi <- max(rowNames$i)
+         mj <- max(colNames$j)
+         if(!mi %in% values$i || !mj %in% values$j){
+            values <- rbind(
+               values,
+               dplyr::tibble(i=mi, j=mj, x=0)
+            )
+         }
+         
+         toRet <- Matrix::sparseMatrix(
+            i=as.integer(values$i), j=as.integer(values$j), x=values$x,
+            dimnames=list(rowNames$name, colNames$name)
+         )
+         
+         return(Matrix::drop0(toRet))
+         
       }else{
-         chFields <- chFields[1:nr,]
-         lim <- nc
-      }
-      toRet <- c()
-      for(st in unique(chFields$table)){
-         stquery <- sprintf(
-            'SELECT `%s` FROM %s ORDER BY %s LIMIT %s',
-            paste(
-               c(
-                  dimcol,
-                  chFields$name[which(chFields$table==st)]
+         
+         ## Matrix ----
+      
+         vtype <- setdiff(
+            tableModel$fields$type,
+            c("row", "column")
+         )
+         dimcol <- ifelse(dd$transposed, "___COLNAMES___", "___ROWNAMES___")
+         chFields <- get_query(
+            x,
+            sprintf(
+               paste(
+                  "SELECT database, table, name FROM system.columns",
+                  " WHERE database='%s' AND table IN ('%s')"
                ),
-               collapse='`, `'
+               tdb,
+               paste(unique(qr$table), collapse="', '")
             ),
-            sprintf('`%s`.`%s`', tdb, st),
-            dimcol,
-            lim
-         )
-         stqr <- get_query(x, stquery, autoalias=FALSE)
-         dimname <- stqr[[dimcol]]
-         stopifnot(
-            !any(duplicated(dimname)),
-            ncol(stqr) > 1
-         )
-         toAdd <- stqr[, -1, drop=FALSE] %>% 
-            as.matrix() %>% 
-            magrittr::set_class(vtype) %>% 
-            magrittr::set_rownames(dimname)
-         toRet <- cbind(toRet, toAdd)
+            autoalias=FALSE,
+            format="TabSeparatedWithNamesAndTypes"
+         ) %>% 
+            dplyr::filter(.data$name!=dimcol) %>% 
+            dplyr::arrange(.data$name)
+         if(!dd$transposed){
+            chFields <- chFields[1:nc,]
+            lim <- nr
+         }else{
+            chFields <- chFields[1:nr,]
+            lim <- nc
+         }
+         toRet <- c()
+         for(st in unique(chFields$table)){
+            stquery <- sprintf(
+               'SELECT `%s` FROM %s ORDER BY %s LIMIT %s',
+               paste(
+                  c(
+                     dimcol,
+                     chFields$name[which(chFields$table==st)]
+                  ),
+                  collapse='`, `'
+               ),
+               sprintf('`%s`.`%s`', tdb, st),
+               dimcol,
+               lim
+            )
+            stqr <- get_query(
+               x, stquery, autoalias=FALSE,
+               format="TabSeparatedWithNamesAndTypes"
+            )
+            dimname <- stqr[[dimcol]]
+            stopifnot(
+               !any(duplicated(dimname)),
+               ncol(stqr) > 1
+            )
+            toAdd <- stqr[, -1, drop=FALSE] %>% 
+               as.matrix()
+            if(!vtype %in% c("Date", "POSIXct")){
+               toAdd <- toAdd %>% magrittr::set_class(vtype)
+            }
+            toAdd <- toAdd %>% magrittr::set_rownames(dimname)
+            toRet <- cbind(toRet, toAdd)
+         }
+         
+         if(!dd$transposed){
+            return(toRet[, sort(colnames(toRet))])
+         }else{
+            return(t(toRet[, sort(colnames(toRet))]))
+         }
+      
       }
       
-      if(!dd$transposed){
-         return(toRet[, sort(colnames(toRet))])
-      }else{
-         return(t(toRet[, sort(colnames(toRet))]))
-      }
-      
-   }else{
+   }else{{
+      ## Table ----
       return(.get_ch_mtable(
          x, tablePath=tablePath, tableModel=tableModel, n_max=n
       ))
-   }
+   }}
 }
 
 .ch_filtByConta <- function(d, fdb, fk, by=10^5){
@@ -2039,24 +2645,81 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
                   tm1=dm[[ntn]], tm2=dm[[tn]]
                )
             }else{
-               nv <- c()
-               toAdd <- data_tables(
-                  fdb, dplyr::all_of(ntn), skip=0, n_max=by
-               )[[1]]
-               r <- nrow(toAdd)
-               while(nrow(toAdd)>0){
-                  toAdd <- .mdjoin(
-                     d1=toAdd, d2=d[[tn]],
-                     by=magrittr::set_names(
-                        fkl$ff[[i]], fkl$tf[[i]]
-                     ),
-                     tm1=dm[[ntn]], tm2=dm[[tn]]
+               if(ReDaMoR::is.MatrixModel(dm[[ntn]])){
+                  dbti <- db_tables(fdb)$dbTables[[ntn]]
+                  tdb <- sub("^`", "", sub("`[.]`.*$", "", dbti))
+                  qr <- get_query(
+                     fdb,
+                     sprintf("SELECT * from %s", dbti),
+                     autoalias=FALSE,
+                     format="TabSeparatedWithNamesAndTypes"
                   )
-                  nv <- rbind(nv, toAdd)
+               }else{
+                  qr <- NULL
+               }
+               if(!is.null(qr) && .is_chMM(qr)){
+                  fv <- lapply(1:length(fkl$tf[[i]]), function(j){
+                     ntm <- dm[[ntn]]
+                     ntf <- fkl$tf[[i]][[j]]
+                     tm <- dm[[tn]]
+                     tf <- fkl$ff[[i]][[j]]
+                     if(inherits(d[[tn]], c("matrix", "Matrix"))){
+                        if(
+                           tm$fields$type[which(tm$fields$name==tf)] ==
+                           "row"
+                        ){
+                           tv <- rownames(d[[tn]])
+                        }else{
+                           if(
+                              tm$fields$type[which(tm$fields$name==ntf)] ==
+                              "column"
+                           ){
+                              tv <- colnames(d[[tn]])
+                           }else{
+                              stop(sprintf(
+                                 paste(
+                                    "The field type of %s in the %s MM",
+                                    "should be row or column"
+                                 ),
+                                 tf, tn
+                              ))
+                           }
+                        }
+                     }else{
+                        tv <- d[[tn]][[tf]]
+                     }
+                     toRet <- list(tv)
+                     names(toRet) <- ntf
+                     return(toRet)
+                  })
+                  fv <- do.call(c, fv)
+                  nv <- do.call(
+                     filter_mdb_matrix,
+                     c(
+                        list(x=fdb, tableName=ntn),
+                        fv
+                     )
+                  )
+               }else{
+                  nv <- c()
                   toAdd <- data_tables(
-                     fdb, dplyr::all_of(ntn), skip=r, n_max=by
+                     fdb, dplyr::all_of(ntn), skip=0, n_max=by
                   )[[1]]
-                  r <- r + nrow(toAdd)
+                  r <- nrow(toAdd)
+                  while(nrow(toAdd)>0){
+                     toAdd <- .mdjoin(
+                        d1=toAdd, d2=d[[tn]],
+                        by=magrittr::set_names(
+                           fkl$ff[[i]], fkl$tf[[i]]
+                        ),
+                        tm1=dm[[ntn]], tm2=dm[[tn]]
+                     )
+                     nv <- rbind(nv, toAdd)
+                     toAdd <- data_tables(
+                        fdb, dplyr::all_of(ntn), skip=r, n_max=by
+                     )[[1]]
+                     r <- r + nrow(toAdd)
+                  }
                }
             }
             d[[ntn]] <<- nv
@@ -2079,30 +2742,89 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
       if(nrow(fkl)>0){
          for(i in 1:nrow(fkl)){
             ntn <- fkl$to[i]
-            vta <- c()
-            toAdd <- data_tables(
-               fdb, dplyr::all_of(ntn), skip=0, n_max=by
-            )[[1]]
-            r <- nrow(toAdd)
-            while(nrow(toAdd)>0){
-               toAdd <- .mdjoin(
-                  d1=toAdd, d2=d[[tn]],
-                  by=magrittr::set_names(
-                     fkl$ff[[i]], fkl$tf[[i]]
-                  ),
-                  tm1=dm[[ntn]], tm2=dm[[tn]]
+
+            if(ReDaMoR::is.MatrixModel(dm[[ntn]])){
+               
+               fv <- lapply(1:length(fkl$tf[[i]]), function(j){
+                  ntm <- dm[[ntn]]
+                  ntf <- fkl$tf[[i]][[j]]
+                  tm <- dm[[tn]]
+                  tf <- fkl$ff[[i]][[j]]
+                  if(inherits(d[[tn]], c("matrix", "Matrix"))){
+                     if(
+                        tm$fields$type[which(tm$fields$name==tf)] ==
+                        "row"
+                     ){
+                        tv <- rownames(d[[tn]])
+                     }else{
+                        if(
+                           tm$fields$type[which(tm$fields$name==ntf)] ==
+                           "column"
+                        ){
+                           tv <- colnames(d[[tn]])
+                        }else{
+                           stop(sprintf(
+                              paste(
+                                 "The field type of %s in the %s MM",
+                                 "should be row or column"
+                              ),
+                              tf, tn
+                           ))
+                        }
+                     }
+                  }else{
+                     tv <- d[[tn]][[tf]]
+                  }
+                  if(
+                     ntm$fields$type[which(ntm$fields$name==ntf)] ==
+                     "row"
+                  ){
+                     tv <- union(tv, rownames(d[[ntn]]))
+                  }else{
+                     tv <- union(tv, colnames(d[[ntn]]))
+                  }
+                  toRet <- list(tv)
+                  names(toRet) <- ntf
+                  return(toRet)
+               })
+               fv <- do.call(c, fv)
+               
+               d[[ntn]] <<- do.call(
+                  filter_mdb_matrix,
+                  c(
+                     list(x=fdb, tableName=ntn),
+                     fv
+                  )
                )
-               vta <- rbind(vta, toAdd)
+               
+            }else{            
+            
+               vta <- c()
                toAdd <- data_tables(
-                  fdb, dplyr::all_of(ntn), skip=r, n_max=by
+                  fdb, dplyr::all_of(ntn), skip=0, n_max=by
                )[[1]]
-               r <- r + nrow(toAdd)
+               r <- nrow(toAdd)
+               while(nrow(toAdd)>0){
+                  toAdd <- .mdjoin(
+                     d1=toAdd, d2=d[[tn]],
+                     by=magrittr::set_names(
+                        fkl$ff[[i]], fkl$tf[[i]]
+                     ),
+                     tm1=dm[[ntn]], tm2=dm[[tn]]
+                  )
+                  vta <- rbind(vta, toAdd)
+                  toAdd <- data_tables(
+                     fdb, dplyr::all_of(ntn), skip=r, n_max=by
+                  )[[1]]
+                  r <- r + nrow(toAdd)
+               }
+               d[[ntn]] <<- rbind(
+                  d[[ntn]],
+                  vta
+               ) %>%
+                  dplyr::distinct()
+               
             }
-            d[[ntn]] <<- rbind(
-               d[[ntn]],
-               vta
-            ) %>%
-               dplyr::distinct()
          }
       }
    }
