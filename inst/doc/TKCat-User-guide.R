@@ -9,6 +9,7 @@ opts_chunk$set(
    cache.lazy=FALSE
 )
 library(TKCat)
+igraph_available <- "igraph" %in% installed.packages()[,"Package"]
 
 ## ---- message=FALSE-----------------------------------------------------------
 library(readr)
@@ -34,9 +35,14 @@ HPO_diseaseHP
 
 ## ---- out.height="200px"------------------------------------------------------
 mhpo_dm <- ReDaMoR::df_to_model(HPO_hp, HPO_diseases, HPO_diseaseHP)
-mhpo_dm %>%
-   ReDaMoR::auto_layout(lengthMultiplier=80) %>% 
-   plot()
+if(igraph_available){
+   mhpo_dm %>%
+      ReDaMoR::auto_layout(lengthMultiplier=80) %>% 
+      plot()
+}else{
+   mhpo_dm %>%
+      plot()
+}
 
 ## ---- eval=FALSE--------------------------------------------------------------
 #  mhpo_dm <- ReDaMoR::model_relational_data(mhpo_dm)
@@ -260,8 +266,13 @@ file_clinvar %>% pull(traitNames)
 
 ## -----------------------------------------------------------------------------
 file_clinvar[1:3]
-c(file_clinvar[1:3], file_hpo[c(1,5,7)]) %>% 
-   data_model() %>% auto_layout(force=TRUE) %>% plot()
+if(igraph_available){
+   c(file_clinvar[1:3], file_hpo[c(1,5,7)]) %>% 
+      data_model() %>% auto_layout(force=TRUE) %>% plot()
+}else{
+   c(file_clinvar[1:3], file_hpo[c(1,5,7)]) %>% 
+      data_model() %>% plot()
+}
 
 ## -----------------------------------------------------------------------------
 filtered_clinvar <- file_clinvar %>%
@@ -313,7 +324,8 @@ if(!inherits(bedCheck, "try-error") && bedCheck){
    filtered_cv_chembl <- merge(
       x=file_clinvar,
       y=file_chembl,
-      by=sel_coll
+      by=sel_coll,
+      dmAutoLayout=igraph_available
    )
 }
 
@@ -327,7 +339,9 @@ sel_coll <- get_shared_collections(file_hpo, file_clinvar) %>%
 sel_coll
 
 ## -----------------------------------------------------------------------------
-hpo_clinvar <- merge(file_hpo, file_clinvar, by=sel_coll)
+hpo_clinvar <- merge(
+   file_hpo, file_clinvar, by=sel_coll, dmAutoLayout=igraph_available
+)
 plot(data_model(hpo_clinvar))
 hpo_clinvar$HPO_diseases_traitCref
 
