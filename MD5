@@ -1,10 +1,10 @@
-c14f5c6d4c704beff7a02c17bcef5561 *DESCRIPTION
+0c2bc07a0395ae375b0334138382d93f *DESCRIPTION
 d145e98dd525924d524621aeefc06f87 *NAMESPACE
 4eae021796f0897246db3c96b5dbc267 *R/ClickHouse.R
 122e4cd0fa5be3436e643417c7561290 *R/MDB.R
 6f9f3ff0b57072eaec5a5b90840e015c *R/TKCat.R
 626bb8c153937272ba3ae64818318a6d *R/chMDB.R
-a5072d2e707eee2ecf0bd817b4f656f5 *R/chTKCat.R
+9dd9cc7eab591df0ee53afd473fb4f3b *R/chTKCat.R
 9cf871cae239afe4d95b7a7aa82ed2da *R/collection_members.R
 4a17f64f588e5cc99c3d03506542217d *R/data-model.R
 a1e68495c3cc70502eeeb8ba1a5304a1 *R/fileMDB.R
@@ -27,7 +27,7 @@ a97f21e4d3f47623a6641731aec50929 *inst/Collections/Built-in/Condition-mapper.R
 e8315e605a524ac400b28d84e7745938 *inst/Collections/Collection-Schema.json
 2287e3c9df1f56af23aabc1cc8fe1f2b *inst/doc/TKCat-User-guide.R
 ff6d4011c21e0b3b77b30c68f7305c72 *inst/doc/TKCat-User-guide.Rmd
-ecb58ec15a33a9dff8621d29ac495b00 *inst/doc/TKCat-User-guide.html
+e329379b79ca732b8f2482a8bb73e128 *inst/doc/TKCat-User-guide.html
 710d88d3404ceb44a2dda5ddc11d61ba *inst/examples/CHEMBL/DESCRIPTION.json
 2fa41f8e28cc6954bcf761268320c438 *inst/examples/CHEMBL/data/CHEMBL_bio_component_sequences.txt.gz
 7ebd28941c4dcf65ae204362c2dba989 *inst/examples/CHEMBL/data/CHEMBL_biotherapeutic_components.txt.gz
@@ -69,7 +69,7 @@ b18252a647e0528e0318f139b18a314f *inst/examples/ClinVar/model/ClinVar.json
 020fc5523b9ca670462c9e5e208c62ca *inst/examples/ClinVar/model/Collections/Condition-ClinVar_conditions_1.0.json
 e2a0bce3cea6542a20af75f6577b484d *inst/examples/fileMDB-examples.R
 94308a3585b0e7ed8bd474590d4a7e25 *inst/examples/memoMDB-examples.R
-2aed8f278a88580c2509ddbb8fad8772 *inst/pkgdown.yml
+0e7f5b8e1fb5cc5593743aabbed86f6d *inst/pkgdown.yml
 a869a754b242d9046f7247ff672a01f9 *inst/www/TKCat-small.png
 82384f76286e547fd4773b2ff2236968 *inst/www/cerulean.css
 4c7d3f5a957e6d4604357f0c33500dce *inst/www/defChanges.css
