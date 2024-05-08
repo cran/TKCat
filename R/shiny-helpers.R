@@ -9,7 +9,7 @@ TKCAT_LOGO_DIV <- shiny::div(
          height="120px",
          id="mainLogo"
       ),
-      href="https://github.com/patzaw/TKCat",
+      href="https://patzaw.github.io/TKCat/",
       target="_blank"
    ),
    style=paste(
@@ -74,7 +74,8 @@ TKCAT_LOGO_DIV <- shiny::div(
    sysInterface,
    userManager=FALSE,
    manList,
-   logoDiv=TKCAT_LOGO_DIV
+   logoDiv=TKCAT_LOGO_DIV,
+   totalSize=FALSE
 ){
    
    ## Resources ----
@@ -148,6 +149,17 @@ TKCAT_LOGO_DIV <- shiny::div(
             ),
             mit
          ))
+      ))
+   }
+   
+   #### Size ----
+   if(totalSize){
+      sbelts <- c(sbelts, list(
+         shiny::tags$hr(),
+         shinydashboard::menuItem(
+            shiny::uiOutput("totalSize"),
+            icon=NULL
+         )
       ))
    }
    
@@ -242,6 +254,12 @@ TKCAT_LOGO_DIV <- shiny::div(
    shinydashboard::dashboardBody(
       ## Page header ----
       shiny::tags$head(
+         shiny::tags$style(shiny::HTML(
+            paste(
+               'table.dataTable tr.selected td a',
+               '{background-color: white !important;}'
+            )
+         )),
          shiny::tags$link(
             rel="icon",
             href=tabIcon
@@ -268,8 +286,13 @@ TKCAT_LOGO_DIV <- shiny::div(
    ddir=NULL,
    userManager=NULL,
    skinColors=c("blue", "yellow"),
-   title=NULL
+   title=NULL,
+   totalSize=FALSE
 ){
+   
+   pckn <- utils::packageName()
+   jsFormatBytes <- readLines(system.file("www/format_bytes.js", package=pckn))
+   
    
    function(input, output, session) {
       
@@ -343,16 +366,43 @@ TKCAT_LOGO_DIV <- shiny::div(
       }
       
       ########################@
+      ## Total size ----
+      if(totalSize){
+         output$totalSize <- shiny::renderUI({
+            tkcon <- instance$tkcat
+            req(tkcon)
+            totalSize <- sum(list_tables(tkcon)$total_bytes,  na.rm = TRUE)
+            shiny::actionLink(
+               inputId="totalSize",
+               label=shiny::span(
+                  paste("Total size:", .format_bytes(totalSize))
+               ),
+               icon=shiny::icon(
+                  "database",
+                  verify_fa = FALSE
+               ),
+               style="margin:0;",
+               title="Total size"
+            )
+         })
+      }
+      
+      ########################@
       ## Selection status ----
       selStatus <- shiny::reactiveValues(
          resource=NULL,
          mdb=NULL,
+         access=NULL,
          tables=NULL
       )
       output$status <- shiny::renderUI({
          mdb <- selStatus$mdb
          shiny::req(mdb)
-         dbi <- db_info(mdb)
+         if(is.MDB(mdb)){
+            dbi <- db_info(mdb)
+         }else{
+            dbi <- mdb$dbInfo
+         }
          shiny::tags$p(
             "Selected resource:",
             shiny::tags$strong(dbi$name),
@@ -368,24 +418,40 @@ TKCAT_LOGO_DIV <- shiny::div(
          validInput=FALSE
       )
       shiny::observe({
-         mdbs$list <- list_MDBs(instance$tkcat)
-         mdbs$collections <- collection_members(instance$tkcat)
+         shiny::withProgress(
+            message="Getting list of MDBs",
+            expr={
+               mdbs$list <- list_MDBs(instance$tkcat)
+               mdbs$collections <- collection_members(instance$tkcat)
+            }
+         )
       })
       output$mdbList <- DT::renderDT({
          shiny::req(mdbs$list)
          colToTake <- intersect(
-            c("name", "title", "access", "maintainer", "timestamp"),
+            c(
+               "name", "title", "access", "maintainer", "timestamp",
+               "total_size"
+            ),
             colnames(mdbs$list)
          )
          toShow <- mdbs$list %>%
             dplyr::select(dplyr::all_of(colToTake)) %>%
-            dplyr::rename("Resource"="name") %>% 
+            dplyr::rename("Resource"="name") %>%  
             dplyr::rename_all(function(x){
+               x <- gsub("_", " ", x)
                paste0(
                   toupper(substr(x, 1, 1)),
                   substr(x, 2, nchar(x))
                )
             })
+         if("Total size" %in% colnames(toShow)){
+            toShow <- toShow %>%  
+               dplyr::mutate("Total size" = signif(
+                  .data$`Total size`/2^(30), 3)
+               ) %>% 
+               dplyr::rename("Total size (GB)"="Total size")
+         }
          if(nrow(mdbs$collections)>0){
             cm <- mdbs$collections %>%
                dplyr::select("collection", "resource") %>%
@@ -426,6 +492,10 @@ TKCAT_LOGO_DIV <- shiny::div(
                pageLength=10,
                dom=c("ltip"),
                order=list(list(0, 'asc'))
+               # columnDefs = list(list(
+               #    targets = which(colnames(toShow)=="Total size")-1,
+               #    render = DT::JS(jsFormatBytes)
+               # ))
             )
          )
          if("Access" %in% colnames(toShow)){
@@ -445,11 +515,13 @@ TKCAT_LOGO_DIV <- shiny::div(
       
       shiny::observe({
          shiny::req(mdbs$validInput)
+         mdbl <- mdbs$list
          s <- input$mdbList_rows_selected
-         n <- mdbs$list$name[s]
+         n <- mdbl$name[s]
          if(length(n)==0 || n==""){
             selStatus$resource <- NULL
             selStatus$mdb <- NULL
+            selStatus$access <- NULL
          }else{
             selStatus$resource <- n
          }
@@ -457,20 +529,54 @@ TKCAT_LOGO_DIV <- shiny::div(
       shiny::observe({
          n <- selStatus$resource
          shiny::req(n)
-         mdb <- try(get_MDB(instance$tkcat, n, check=FALSE), silent=TRUE)
-         selStatus$mdb <- mdb
-         if(
-            inherits(mdb, "try-error") ||
-            !all(shiny::isolate(selStatus$tables) %in% names(mdb))
-         ){
-            selStatus$tables <- NULL
+         mdbl <- shiny::isolate(mdbs$list)
+         if("access" %in% colnames(mdbl)){
+            access <- dplyr::filter(mdbl, .data$name==!!n) %>% 
+               dplyr::pull("access")
+         }else{
+            access <- NULL
          }
+         selStatus$access <- access
+         shiny::withProgress(
+            message=sprintf("Getting %s metadata", n),
+            expr={
+               if(!is.null(access) && access=="none"){
+                  mdb <- tryCatch(
+                     get_chMDB_metadata(instance$tkcat, n),
+                     error = function(e) e
+                  )
+               }else{
+                  mdb <- tryCatch(
+                     get_MDB(instance$tkcat, n, check=FALSE),
+                     error = function(e) e
+                  )
+               }
+               selStatus$mdb <- mdb
+               if(is.MDB(mdb)){
+                  m <- data_model(mdb)
+               }
+               if(is.list(mdb) && "dataModel" %in% names(mdb)){
+                  m <- mdb$dataModel
+               }
+               if(
+                  inherits(mdb, c("try-error", "error")) ||
+                  !all(shiny::isolate(selStatus$tables) %in% names(m))
+               ){
+                  selStatus$tables <- NULL
+               }
+         })
       })
       shiny::observe({
          mdb <- selStatus$mdb
          shiny::req(mdb)
+         if(is.MDB(mdb)){
+            m <- data_model(mdb)
+         }
+         if(is.list(mdb) && "dataModel" %in% names(mdb)){
+            m <- mdb$dataModel
+         }
          tn <- shiny::isolate(selStatus$tables)
-         if(!all(tn %in% names(mdb))){
+         if(inherits(mdb, c("try-error", "error")) || !all(tn %in% names(m))){
             selStatus$tables <- NULL
          }
       })
@@ -481,7 +587,9 @@ TKCAT_LOGO_DIV <- shiny::div(
       output$dbInfo <- shiny::renderUI({
          mdb <- selStatus$mdb
          shiny::req(!is.null(mdb))
-         if(inherits(mdb, "try-error")){
+         access <- shiny::isolate(selStatus$access)
+         tkcon <- shiny::isolate(instance$tkcat)
+         if(inherits(mdb, c("try-error", "error"))){
             n <- shiny::isolate(selStatus$resource)
             shiny::tagList(
                shiny::tags$p(
@@ -490,21 +598,46 @@ TKCAT_LOGO_DIV <- shiny::div(
                )
             )
          }else{
-            dbi <- db_info(mdb)
-            if(is.fileMDB(mdb)){
-               dbs <- sum(data_file_size(mdb)$size)
-               dbi$size <- .format_file_size(dbs)
-            }else{
-               if(!is.metaMDB(mdb)){
-                  dbi$records <- sum(count_records(mdb))
+            if(is.MDB(mdb)){
+               dbi <- db_info(mdb)
+               dm <- data_model(mdb)
+               dbi$"Number of tables" <- length(dm)
+               dbi$"Number of fields" <- lapply(
+                  dm, function(x) nrow(x$fields)
+               ) %>% 
+                  unlist() %>% 
+                  sum()
+               if(is.fileMDB(mdb)){
+                  dbs <- sum(data_file_size(mdb)$size)
+                  dbi$size <- .format_bytes(dbs)
+               }else{
+                  if(!is.metaMDB(mdb)){
+                     dbdims <- dims(mdb)
+                     dbi$values <- sum(dbdims$nrow*dbdims$ncol)
+                     dbi$size <- .format_bytes(sum(dbdims$bytes))
+                  }
                }
-            }
-            if(is.chMDB(mdb)){
-               ts <- get_chMDB_timestamps(unclass(mdb)$tkcon, dbi$name)
+               if(is.chMDB(mdb)){
+                  ts <- get_chMDB_timestamps(unclass(mdb)$tkcon, dbi$name)
+                  if(!is.null(ts)){
+                     dbi$"other instances"=nrow(ts)-1
+                  }
+               }
+            }else{
+               dbi <- mdb$dbInfo
+               dm <- mdb$dataModel
+               dbi$"Number of tables" <- length(dm)
+               dbi$"Number of fields" <- lapply(
+                  dm, function(x) nrow(x$fields)
+               ) %>% 
+                  unlist() %>% 
+                  sum()
+               ts <- get_chMDB_timestamps(tkcon, dbi$name)
                if(!is.null(ts)){
                   dbi$"other instances"=nrow(ts)-1
                }
             }
+            dbi$access <- access
             shiny::tagList(
                shiny::h3(dbi$name),
                do.call(shiny::tags$ul, lapply(
@@ -516,9 +649,17 @@ TKCAT_LOGO_DIV <- shiny::div(
                               shiny::HTML(dbi[[n]]),
                               href=dbi[[n]], target="_blank"
                            ) %>% as.character()
-                        }else if(n=="maintainer"){
+                        }else if(n %in% c("maintainer", "description")){
                            vt <- markdown::renderMarkdown(text=dbi[[n]])
                            vt <- gsub("<[/]?p>", "", as.character(vt))
+                        }else if(n=="access"){
+                           vt <- as.character(shiny::tags$span(
+                              dbi[[n]],
+                              style=sprintf(
+                                 "color:%s;",
+                                 ifelse(dbi[[n]]=="none", "red", "blue")
+                              )
+                           ))
                         }else if(is.numeric(dbi[[n]])){
                            vt <- format(dbi[[n]], big.mark=",")
                         }else{
@@ -631,7 +772,7 @@ TKCAT_LOGO_DIV <- shiny::div(
       ## Data model ----
       shiny::observe({
          mdb <- selStatus$mdb
-         if(is.null(mdb) || inherits(mdb, "try-error")){
+         if(is.null(mdb) || inherits(mdb, c("try-error", "error"))){
             session$sendCustomMessage('hideNavs', 'model')
          }else{
             n <- shiny::isolate(selStatus$resource)
@@ -663,20 +804,29 @@ TKCAT_LOGO_DIV <- shiny::div(
             dbdm$model <- data_model(mdb)
             dbdm$collections <- collection_members(mdb)
          }else{
-            dbdm$model <- NULL
-            dbdm$collections <- NULL
-            dbdm$validInput <- FALSE
+            if(is.list(mdb) && "dataModel" %in% names(mdb)){
+               dbdm$model <- mdb$dataModel
+               dbdm$collections <- mdb$collectionMembers
+            }else{
+               dbdm$model <- NULL
+               dbdm$collections <- NULL
+               dbdm$validInput <- FALSE
+            }
          }
       })
       
       output$dataModel <- visNetwork::renderVisNetwork({
          mdb <- selStatus$mdb
          shiny::req(mdb)
-         dm <- data_model(mdb)
+         if(is.MDB(mdb)){
+            dm <- data_model(mdb)
+         }else{
+            dm <- mdb$dataModel
+         }
          dbdm$validInput <- TRUE
          nodesIdSelection <- list(enabled=TRUE, useLabels=FALSE)
          sel <- shiny::isolate(selStatus$tables) %>% 
-            intersect(names(mdb))
+            intersect(names(dm))
          if(length(sel)>0){
             nodesIdSelection$selected <- sel
          }
@@ -692,7 +842,13 @@ TKCAT_LOGO_DIV <- shiny::div(
          n <- input$dataModel_selected
          mdb <- shiny::isolate(selStatus$mdb)
          shiny::req(mdb)
-         if(length(n)==0 || n=="" || !all(n %in% names(mdb))){
+         if(is.MDB(mdb)){
+            m <- data_model(mdb)
+         }
+         if(is.list(mdb) && "dataModel" %in% names(mdb)){
+            m <- mdb$dataModel
+         }
+         if(length(n)==0 || n=="" || !all(n %in% names(m))){
             selStatus$tables <- NULL
          }else{
             selStatus$tables <- n
@@ -756,6 +912,14 @@ TKCAT_LOGO_DIV <- shiny::div(
       output$tableInfo <- shiny::renderUI({
          mdb <- selStatus$mdb
          shiny::req(mdb)
+         if(!is.MDB(mdb)){
+            return(shiny::tagList(
+               shiny::tags$strong(
+                  "You don't have access to these data",
+                  style='color:red;'
+               )
+            ))
+         }
          sel <- selStatus$tables %>%
             intersect(names(mdb))
          shiny::req(sel)
@@ -772,17 +936,37 @@ TKCAT_LOGO_DIV <- shiny::div(
                      data_file_size(mdb) %>% 
                         dplyr::filter(table==!!sel) %>% 
                         dplyr::pull("size") %>% 
-                        .format_file_size(),
+                        .format_bytes(),
                      sprintf("(showing %s records)", nr)
                   )
                }else{
                   if(!is.metaMDB(mdb)){
-                     shiny::tags$li(
-                        shiny::tags$strong("Number of records"),
-                        ":",
-                        count_records(mdb, dplyr::all_of(sel)) %>%
-                           format(big.mark=","),
-                        sprintf("(showing %s records)", nr)
+                     tdim <- dims(mdb, all_of(sel))
+                     list(
+                        shiny::tags$li(
+                           shiny::tags$strong("Number of columns"),
+                           ":",
+                           tdim$ncol %>%
+                              format(big.mark=",")
+                        ),
+                        shiny::tags$li(
+                           shiny::tags$strong("Number of rows"),
+                           ":",
+                           tdim$nrow %>%
+                              format(big.mark=",")
+                        ),
+                        shiny::tags$li(
+                           shiny::tags$strong("Size"),
+                           ":",
+                           .format_bytes(tdim$bytes)
+                        ),
+                        shiny::tags$li(
+                           shiny::tags$strong("Number of values"),
+                           ":",
+                           (tdim$nrow*tdim$ncol) %>%
+                              format(big.mark=","),
+                           sprintf("(showing %s records)", nr)
+                        )
                      )
                   }
                }
@@ -1100,7 +1284,7 @@ TKCAT_LOGO_DIV <- shiny::div(
          ))
          mdb <- selStatus$mdb
          shiny::req(!is.null(mdb))
-         if(inherits(mdb, "try-error")){
+         if(inherits(mdb, c("try-error", "error"))){
             n <- shiny::isolate(selStatus$resource)
             shiny::tagList(
                shiny::tags$p(
@@ -1419,7 +1603,7 @@ TKCAT_LOGO_DIV <- shiny::div(
                shiny::isolate(instance$tkcat),
                user=u, password=p
             ), silent=TRUE)
-            if(!inherits(nk, "try-error")){
+            if(!inherits(nk, c("try-error", "error"))){
                suppressWarnings(db_disconnect(instance$tkcat))
                instance$tkcat <- nk
                okConnect(TRUE)

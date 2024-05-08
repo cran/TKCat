@@ -428,7 +428,8 @@ explore_MDBs.TKCat <- function(
          sidebar=.etkc_sd_sidebar(
             sysInterface=FALSE,
             manList=c(
-               "TKCat user guide"="doc/TKCat-User-guide.html"
+               "Introduction to TKCat"="doc/TKCat.html",
+               "Requirements for Knowledge Management"="doc/TKCat-KMR-POK.html"
             ),
             logoDiv=logoDiv
          ),
@@ -447,7 +448,8 @@ explore_MDBs.TKCat <- function(
    x,
    subSetSize=100,
    ddir=NULL,
-   title=NULL
+   title=NULL,
+   ...
 ){
    .build_etkc_server_default(
       x=x, subSetSize=subSetSize,

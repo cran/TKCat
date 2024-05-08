@@ -127,6 +127,26 @@ data_tables <- function(x, ..., skip=0, n_max=Inf){
 
 
 ###############################################################################@
+#' List tables in a clickhouse database
+#' 
+#' @param x an object with a clickhouse connection
+#' @param ... method specific parameters
+#' 
+#' @return A tibble with at least the following columns:
+#' - **database**: the name of the database
+#' - **name**: the name of the table
+#' - **total_rows**: the number of rows in the table
+#' - **total_bytes**: the size of the table
+#' - **total_columns**: the number of columns in the table
+#' 
+#' @export
+#' 
+list_tables <- function(x, ...){
+   UseMethod("list_tables", x)
+}
+
+
+###############################################################################@
 #' Count the number of records
 #'
 #' @param x an object with embedded data tables
@@ -150,10 +170,11 @@ count_records <- function(x, ...){
 #' following columns:
 #' 
 #' - name: the name of the table
-#' - format: "table" or "matrix"
+#' - format: "table", "matrix" or "MatrixMarket"
 #' - ncol: number of columns
 #' - nrow: number of rows
 #' - records: number of records (`nrow` for tables and `ncol*nrow` for matrices)
+#' - bytes: size in bytes
 #' - transposed: FALSE by default. TRUE only for matrices stored in a
 #' transposed format.
 #' 
@@ -420,6 +441,41 @@ filter_mdb_matrix <- function(x, tableName, ...){
 #' 
 explore_MDBs <- function(x, ...){
    UseMethod("explore_MDBs", x)
+}
+
+
+###############################################################################@
+#' Add a set of helper functions to a compatible object
+#' 
+#' @param x an object accepting helpers
+#' @param code file path to the source code of helper functions
+#' @param name the name of the helper set
+#' @param language the programming language of the code (default: "R")
+#' @param ... method specific parameters
+#' 
+#' @return Return x with additional helpers
+#' 
+#' @export
+#' 
+add_helpers <- function(x, code, name, language, ...){
+   UseMethod("add_helpers", x)
+}
+
+
+###############################################################################@
+#' Get a set of helper functions from an object
+#' 
+#' @param x an object with helpers
+#' @param hnames the names of the helper sets. If NA (default),
+#' all available are sourced.
+#' @param ... method specific parameters
+#' 
+#' @return Return a list of functions
+#' 
+#' @export
+#' 
+get_R_helpers <- function(x, hnames, ...){
+   UseMethod("get_R_helpers", x)
 }
 
 

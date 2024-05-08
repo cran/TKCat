@@ -310,7 +310,15 @@ format.chTKCat <- function(x, ...){
             )
          ),
          lapply(names(x$cpar), function(p){
-            sprintf("      + %s: %s", p, x$cpar[[p]])
+            sprintf(
+               "      + %s: %s",
+               p,
+               ifelse(
+                  (nchar(x$cpar[[p]]) + nchar(p)) > 72,
+                  paste0(substr(x$cpar[[p]], 1, 69-nchar(p)), "..."),
+                  x$cpar[[p]]
+               )
+            )
          }),
          list(
             sep="\n"
@@ -355,6 +363,8 @@ db_disconnect.chTKCat <- function(x){
 db_reconnect.chTKCat <- function(x, user, password, ntries=3, ...){
    xn <- deparse(substitute(x))
    con <- x$chcon
+   newPar <- list(...)
+   newPar <- c(x$cpar[setdiff(names(x$cpar), names(newPar))], newPar)
    
    if(missing(user)){
       user <- con@user
@@ -369,7 +379,7 @@ db_reconnect.chTKCat <- function(x, user, password, ntries=3, ...){
             user=user,
             password=""
          ),
-         x$cpar
+         newPar
       )), silent=TRUE)
       n <- 0
       while(inherits(ncon, "try-error") & n < ntries){
@@ -387,7 +397,7 @@ db_reconnect.chTKCat <- function(x, user, password, ntries=3, ...){
                user=user,
                password=password
             ),
-            x$cpar
+            newPar
          )), silent=TRUE)
          n <- n+1
       }
@@ -403,7 +413,7 @@ db_reconnect.chTKCat <- function(x, user, password, ntries=3, ...){
             user=user,
             password=password
          ),
-         x$cpar
+         newPar
       )), silent=TRUE)
    }
    for(s in names(x$settings)){
@@ -412,6 +422,7 @@ db_reconnect.chTKCat <- function(x, user, password, ntries=3, ...){
    
    nv <- x
    nv$chcon <- ncon
+   nv$cpar <- newPar
    nv <- check_chTKCat(nv)
    assign(xn, nv, envir=parent.frame(n=1))
    invisible(nv)
@@ -445,6 +456,22 @@ get_hosts.chTKCat <- function(x, ...){
 get_query.chTKCat <- function(x, query, ...){
    DBI::dbGetQuery(x$chcon, query, ...) %>%
       dplyr::as_tibble()
+}
+
+
+###############################################################################@
+#' 
+#' @param dbNames the name of databases to focus on (default NULL ==> all)
+#'
+#' @rdname list_tables
+#' @method list_tables chTKCat
+#' 
+#' @export
+#'
+list_tables.chTKCat <- function(
+      x, dbNames=NULL, ...
+){
+   list_tables(x$chcon, dbNames=dbNames, ...)
 }
 
 
@@ -633,7 +660,7 @@ list_chTKCat_users <- function(x){
 #' 
 #' @param x a [chTKCat] object
 #' @param login user login
-#' @param password user password
+#' @param password user password (NA ==> no password)
 #' @param contact contact information (can be NA)
 #' @param admin a logical indicating if the user is an admin of the chTKCat
 #' instance
@@ -678,11 +705,12 @@ create_chTKCat_user <- function(
    )
    con <- x$chcon
    ## Create the user in ClickHouse ----
+   elogin <- gsub("'", "\\\\'", login)
    DBI::dbSendQuery(
       con, 
       sprintf(
          "CREATE USER '%s' %s",
-         login,
+         elogin,
          ifelse(
             is.na(password),
             "IDENTIFIED WITH no_password",
@@ -710,7 +738,7 @@ create_chTKCat_user <- function(
          con,
          sprintf(
             "GRANT ALL ON *.* TO '%s' WITH GRANT OPTION",
-            login
+            elogin
          )
       )
    }else{
@@ -719,7 +747,7 @@ create_chTKCat_user <- function(
          con,
          sprintf(
             "REVOKE ALL ON *.* FROM '%s'",
-            login
+            elogin
          )
       )
       
@@ -732,7 +760,7 @@ create_chTKCat_user <- function(
                   " CREATE DATABASE, CREATE TABLE, DROP TABLE, ALTER, INSERT",
                   " ON *.* TO '%s' WITH GRANT OPTION"
                ),
-               login
+               elogin
             )
          )
          
@@ -740,27 +768,27 @@ create_chTKCat_user <- function(
             con,
             sprintf(
                "REVOKE ALL ON default.* FROM '%s'",
-               login
+               elogin
             )
          )
          DBI::dbSendQuery(
             con,
             sprintf(
                "REVOKE ALL ON system.* FROM '%s'",
-               login
+               elogin
             )
          )
          
       }
       
       DBI::dbSendQuery(
-         con, sprintf("GRANT SHOW DATABASES ON *.* TO '%s'", login)
+         con, sprintf("GRANT SHOW DATABASES ON *.* TO '%s'", elogin)
       )
       DBI::dbSendQuery(
-         con, sprintf("GRANT SHOW TABLES ON *.* TO '%s'", login)
+         con, sprintf("GRANT SHOW TABLES ON *.* TO '%s'", elogin)
       )
       DBI::dbSendQuery(
-         con, sprintf("GRANT SHOW COLUMNS ON *.* TO '%s'", login)
+         con, sprintf("GRANT SHOW COLUMNS ON *.* TO '%s'", elogin)
       )
       DBI::dbSendQuery(
          con,
@@ -769,17 +797,17 @@ create_chTKCat_user <- function(
                "GRANT SELECT(name, instance, version, contact)",
                "ON default.System TO '%s'"
             ),
-            login
+            elogin
          )
       )
       DBI::dbSendQuery(
-         con, sprintf("GRANT SELECT ON default.Collections TO '%s'", login)
+         con, sprintf("GRANT SELECT ON default.Collections TO '%s'", elogin)
       )
       DBI::dbSendQuery(
          con,
          sprintf(
             "GRANT SELECT(login, admin, provider) ON default.Users TO '%s'",
-            login
+            elogin
          )
       )
    }
@@ -824,11 +852,12 @@ change_chTKCat_password <- function(
    )
    con <- x$chcon
    ## Alter the user in ClickHouse ----
+   elogin <- gsub("'", "\\\\'", login)
    DBI::dbSendQuery(
       con, 
       sprintf(
          "ALTER USER '%s' %s",
-         login,
+         elogin,
          ifelse(
             is.na(password),
             "IDENTIFIED WITH no_password",
@@ -917,13 +946,14 @@ update_chTKCat_user <- function(
       ch_insert(con, "default", "Users", new_val)
       
       ## Update GRANTs if necessary ----
+      elogin <- gsub("'", "\\\\'", login)
       if(updateGrants){
          if(admin){
             DBI::dbSendQuery(
                con,
                sprintf(
                   "GRANT ALL ON *.* TO '%s' WITH GRANT OPTION",
-                  login
+                  elogin
                )
             )
          }else{
@@ -932,7 +962,7 @@ update_chTKCat_user <- function(
                con,
                sprintf(
                   "REVOKE ALL ON *.* FROM '%s'",
-                  login
+                  elogin
                )
             )
             
@@ -946,7 +976,7 @@ update_chTKCat_user <- function(
                         " ALTER, INSERT",
                         " ON *.* TO '%s' WITH GRANT OPTION"
                      ),
-                     login
+                     elogin
                   )
                )
                
@@ -954,27 +984,27 @@ update_chTKCat_user <- function(
                   con,
                   sprintf(
                      "REVOKE ALL ON default.* FROM '%s'",
-                     login
+                     elogin
                   )
                )
                DBI::dbSendQuery(
                   con,
                   sprintf(
                      "REVOKE ALL ON system.* FROM '%s'",
-                     login
+                     elogin
                   )
                )
                
             }
             
             DBI::dbSendQuery(
-               con, sprintf("GRANT SHOW DATABASES ON *.* TO '%s'", login)
+               con, sprintf("GRANT SHOW DATABASES ON *.* TO '%s'", elogin)
             )
             DBI::dbSendQuery(
-               con, sprintf("GRANT SHOW TABLES ON *.* TO '%s'", login)
+               con, sprintf("GRANT SHOW TABLES ON *.* TO '%s'", elogin)
             )
             DBI::dbSendQuery(
-               con, sprintf("GRANT SHOW COLUMNS ON *.* TO '%s'", login)
+               con, sprintf("GRANT SHOW COLUMNS ON *.* TO '%s'", elogin)
             )
             DBI::dbSendQuery(
                con,
@@ -983,17 +1013,17 @@ update_chTKCat_user <- function(
                      "GRANT SELECT(name, instance, version, contact)",
                      "ON default.System TO '%s'"
                   ),
-                  login
+                  elogin
                )
             )
             DBI::dbSendQuery(
-               con, sprintf("GRANT SELECT ON default.Collections TO '%s'", login)
+               con, sprintf("GRANT SELECT ON default.Collections TO '%s'", elogin)
             )
             DBI::dbSendQuery(
                con,
                sprintf(
                   "GRANT SELECT(login, admin, provider) ON default.Users TO '%s'",
-                  login
+                  elogin
                )
             )
          }
@@ -1037,13 +1067,14 @@ drop_chTKCat_user <- function(x, login){
    for(mdb in allDb){
       remove_chMDB_user(x=x, login=login, mdb=mdb)
    }
+   elogin <- gsub("'", "\\\\'", login)
    DBI::dbSendQuery(
       con,
-      sprintf("ALTER TABLE default.Users DELETE WHERE login='%s'", login)
+      sprintf("ALTER TABLE default.Users DELETE WHERE login='%s'", elogin)
    )
    DBI::dbSendQuery(
       con,
-      sprintf("DROP USER '%s'", login)
+      sprintf("DROP USER '%s'", elogin)
    )
    invisible()
 }
@@ -1097,9 +1128,15 @@ list_MDBs.chTKCat <- function(x, withInfo=TRUE){
             maintainer=character(),
             public=logical(),
             populated=logical(),
-            access=factor(c(), levels=accessLevels)
+            access=factor(c(), levels=accessLevels),
+            bytes=numeric(),
+            total_size=character()
          )
       }else{
+         dbSize <- list_tables(x) %>% 
+            dplyr::filter(!is.na(.data$total_bytes)) %>% 
+            dplyr::group_by(.data$database) %>%
+            dplyr::summarize(total_size=sum(.data$total_bytes))
          mdbDesc <- DBI::dbGetQuery(
             con,
             paste(
@@ -1189,6 +1226,7 @@ list_MDBs.chTKCat <- function(x, withInfo=TRUE){
                ) %>%
                   factor(levels=accessLevels)
             )
+         toRet <- dplyr::left_join(toRet, dbSize, by=c("name"="database"))
       }
       return(toRet)
    }
@@ -1393,6 +1431,7 @@ drop_chMDB <- function(x, name){
    if("provider" %in%  colnames(ul)){
       pl <- ul$login[which(ul$provider)]
       if(length(pl) > 0){
+         epl <- gsub("'", "\\\\'", pl)
          DBI::dbSendQuery(
             con, 
             sprintf(
@@ -1403,7 +1442,7 @@ drop_chMDB <- function(x, name){
                   " ON `%s`.* TO '%s' WITH GRANT OPTION"
                ),
                name,
-               paste(pl, collapse="', '")
+               paste(epl, collapse="', '")
             )
          )
       }
@@ -1412,13 +1451,14 @@ drop_chMDB <- function(x, name){
       cl <- ul$login
    }
    if(length(cl) > 0){
+      ecl <- gsub("'", "\\\\'", cl)
       DBI::dbSendQuery(
          con,
          sprintf(
             "REVOKE %s ON `%s`.* FROM '%s'",
             paste(CH_DB_STATEMENTS, collapse=", "),
             name,
-            paste(cl, collapse="', '")
+            paste(ecl, collapse="', '")
          )
       )
    }
@@ -1465,13 +1505,17 @@ update_chMDB_grants <- function(x, mdb){
    readUsers <- setdiff(unique(readUsers), adminUsers)
    others <- setdiff(tkcUsers$login, c(readUsers, adminUsers))
    
+   eothers <- gsub("'", "\\\\'", others)
+   ereadUsers <- gsub("'", "\\\\'", readUsers)
+   eadminUsers <- gsub("'", "\\\\'", adminUsers)
+   
    ## Revoke read access ----
    if(length(others) > 0){
       DBI::dbSendQuery(
          con,
          sprintf(
             "REVOKE SELECT ON `%s`.* FROM '%s'",
-            mdb, paste(others, collapse="', '")
+            mdb, paste(eothers, collapse="', '")
          )
       )
       modelTables <- names(CHMDB_DATA_MODEL)
@@ -1480,7 +1524,7 @@ update_chMDB_grants <- function(x, mdb){
             con,
             sprintf(
                "GRANT SELECT ON `%s`.`%s` TO '%s'",
-               mdb, tn, paste(others, collapse="', '")
+               mdb, tn, paste(eothers, collapse="', '")
             )
          )
       }
@@ -1491,7 +1535,7 @@ update_chMDB_grants <- function(x, mdb){
       con,
       sprintf(
          "GRANT SELECT ON `%s`.* TO '%s'",
-         mdb, paste(c(readUsers, adminUsers), collapse="', '")
+         mdb, paste(c(ereadUsers, eadminUsers), collapse="', '")
       )
    )
    
@@ -1504,7 +1548,7 @@ update_chMDB_grants <- function(x, mdb){
                "REVOKE CREATE TABLE, DROP TABLE, ALTER, INSERT",
                " ON `%s`.* FROM '%s'"
             ),
-            mdb, paste(c(readUsers, others), collapse="', '")
+            mdb, paste(c(ereadUsers, eothers), collapse="', '")
          )
       )
    }
@@ -1517,7 +1561,7 @@ update_chMDB_grants <- function(x, mdb){
             "GRANT SELECT, CREATE TABLE, DROP TABLE, ALTER, INSERT",
             " ON `%s`.* TO '%s' WITH GRANT OPTION"
          ),
-         mdb, paste(adminUsers, collapse="', '")
+         mdb, paste(eadminUsers, collapse="', '")
       )
    )
    
@@ -2281,6 +2325,137 @@ remove_chMDB_user <- function(x, mdb, login){
 
 
 ###############################################################################@
+#' Get the metadata of an MDB from a [chTKCat] connection
+#' 
+#' @param x a [chTKCat] object
+#' @param dbName the name of the MDB
+#' @param timestamp the timestamp of the instance to get.
+#' Default=NA: get the current version.
+#' 
+#' @return A list with the following elements:
+#' - dbInfo: General information regarding the MDB
+#' - dataModel: The data model
+#' - collectionMembers: Members of different collections
+#' - access: type of access to the MDB
+#' 
+#' @seealso [get_MDB]
+#' 
+#' @export
+#' 
+get_chMDB_metadata <- function(x, dbName, timestamp=NA){
+   timestamp <- as.POSIXct(timestamp)
+   stopifnot(
+      is.chTKCat(x),
+      is.na(timestamp) || inherits(timestamp, "POSIXct"), length(timestamp)==1
+   )
+   dbl <- list_MDBs(x)
+   if(!is.data.frame(dbl) || !dbName %in% dbl$name){
+      stop(sprintf(
+         "%s does not exist in the provided chTKCat",
+         dbName
+      ))
+   }
+   access <- dplyr::filter(dbl, .data$name==!!dbName)$access
+   tst <- list_chMDB_timestamps(x, dbName)
+   if(is.null(tst) || nrow(tst)==0){
+      tstToComplete <- TRUE
+      if(!is.na(timestamp)){
+         stop("This MDB is not timestamped: timestamp must be NA")
+      }else{
+         if(!dplyr::filter(dbl, .data$name==!!dbName)$populated){
+            stop(sprintf("The %s is not populated yet", dbName))
+         }
+         tst <- dplyr::tibble(
+            table=setdiff(names(CHMDB_DATA_MODEL), MGT_TABLES)
+         ) %>% 
+            dplyr::mutate(
+               instance=.data$table
+            )
+      }
+   }else{
+      tstToComplete <- FALSE
+      if(is.na(timestamp)){
+         if(is.na(attr(tst, "current"))){
+            stop("There is no current instance of the MDB: provide a timestamp")
+         }else{
+            timestamp <- attr(tst, "current")
+         }
+      }
+      if(!timestamp %in% tst$timestamp){
+         stop("The selected timestamp does not exist")
+      }
+      tst <- tst %>% 
+         dplyr::filter(.data$timestamp==!!timestamp)
+   }
+   
+   ## Data model ----
+   tsSelect <- function(table){
+      sprintf(
+         "SELECT * FROM `%s`.`%s`",
+         dbName,
+         tst$instance[which(tst$table==table)]
+      )
+   }
+   dbm <- list(
+      tables=get_query(
+         x, tsSelect("___Tables___"),
+         format="Arrow"
+      ),
+      fields=get_query(
+         x, tsSelect("___Fields___"),
+         format="Arrow"
+      ),
+      primaryKeys=get_query(
+         x, tsSelect("___PrimaryKeys___"),
+         format="TabSeparatedWithNamesAndTypes"
+      ),
+      foreignKeys=get_query(
+         x, tsSelect("___ForeignKeys___"),
+         format="TabSeparatedWithNamesAndTypes"
+      ),
+      indexes=get_query(
+         x, tsSelect("___Indexes___"),
+         format="TabSeparatedWithNamesAndTypes"
+      )
+   )
+   dbm$fields$nullable <- as.logical(dbm$fields$nullable)
+   dbm$fields$unique <- as.logical(dbm$fields$unique)
+   dbm$indexes$unique <- as.logical(dbm$indexes$unique)
+   dataModel <- ReDaMoR::fromDBM(dbm)
+   
+   ## DB information ----
+   dbInfo <- as.list(get_query(
+      x, tsSelect("___MDB___"),
+      format="Arrow"
+   ))
+   dbInfo <- c(dbInfo, list("timestamp"=as.POSIXct(timestamp)))
+   
+   ## Collection members ----
+   collectionMembers <- get_query(
+      x, tsSelect("___CollectionMembers___"),
+      format="TabSeparatedWithNamesAndTypes"
+   ) %>%
+      dplyr::mutate(
+         resource=dbName,
+         static=as.logical(.data$static)
+      ) %>% 
+      dplyr::select(
+         "collection", "cid", "resource", "mid", "table", "field",
+         "static", "value", "type"
+      )
+   attr(collectionMembers, "data.type") <- NULL
+   
+   ## Return model ----
+   return(list(
+      dbInfo=dbInfo,
+      dataModel=dataModel,
+      collectionMembers=collectionMembers,
+      access=access
+   ))
+}
+
+
+###############################################################################@
 #### COLLECTIONS ####
 ###############################################################################@
 
@@ -2650,9 +2825,11 @@ explore_MDBs.chTKCat <- function(
             sysInterface=TRUE,
             userManager=userManager,
             manList=c(
-               "TKCat user guide"="doc/TKCat-User-guide.html"
+               "Introduction to TKCat"="doc/TKCat.html",
+               "Requirements for Knowledge Management"="doc/TKCat-KMR-POK.html"
             ),
-            logoDiv=logoDiv
+            logoDiv=logoDiv,
+            totalSize=TRUE
          ),
          
          ########################@
@@ -2672,14 +2849,16 @@ explore_MDBs.chTKCat <- function(
    ddir=NULL,
    userManager=NULL,
    title=NULL,
-   skinColors=c("blue", "yellow")
+   skinColors=c("blue", "yellow"),
+   ...
 ){
    .build_etkc_server_default(
       x=x, subSetSize=subSetSize, xparams=list(host=host),
       ddir=ddir,
       userManager=userManager,
       title=title,
-      skinColors=skinColors
+      skinColors=skinColors,
+      totalSize=TRUE
    )
 }
 

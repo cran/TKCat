@@ -1,7 +1,7 @@
 Package: TKCat
 Type: Package
 Title: Tailored Knowledge Catalog
-Version: 1.0.7
+Version: 1.1.7
 Authors@R: c(
     person(
         "Patrice", "Godard",
@@ -22,19 +22,20 @@ Description: Facilitate the management of data from knowledge
    create new catalogs suited for specific needs.
 URL: https://patzaw.github.io/TKCat/, https://github.com/patzaw/TKCat/
 BugReports: https://github.com/patzaw/TKCat/issues
-Depends: R (>= 3.6), ReDaMoR (>= 0.7.0), magrittr, DBI, dplyr
-Imports: ClickHouseHTTP, rlang, tidyselect, visNetwork, getPass, shiny,
+Depends: R (>= 3.6), ReDaMoR (>= 0.7.0), magrittr, DBI, visNetwork,
+        dplyr
+Imports: ClickHouseHTTP, rlang, tidyselect, getPass, shiny,
         shinydashboard, DT, htmltools, readr, jsonlite, jsonvalidate
         (>= 1.3.2), base64enc, markdown, promises, future, xml2,
-        Matrix, uuid
+        Matrix, uuid, crayon, roxygen2
 Suggests: knitr, rmarkdown, stringr, RClickhouse, data.tree, BED
 License: GPL-3
 Encoding: UTF-8
 VignetteBuilder: knitr
-RoxygenNote: 7.2.2
+RoxygenNote: 7.3.1
 NeedsCompilation: no
-Packaged: 2023-02-16 12:26:44 UTC; pgodard
+Packaged: 2024-05-08 04:59:34 UTC; pgodard
 Author: Patrice Godard [aut, cre, cph]
 Maintainer: Patrice Godard <patrice.godard@gmail.com>
 Repository: CRAN
-Date/Publication: 2023-02-16 14:50:03 UTC
+Date/Publication: 2024-05-08 06:10:02 UTC
