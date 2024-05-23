@@ -1,4 +1,4 @@
-0dded7d1a47d23c0f6d21251b444a66f *DESCRIPTION
+4fb73b344d62cee64b9244e09c57c43d *DESCRIPTION
 ce52bd572a1e31dcef48d564ac61110f *NAMESPACE
 2759194aadd7dc0872da95d6f829bfb7 *R/ClickHouse.R
 dd8fc41844c9b1feb3d04020a7804011 *R/KM-specifications.R
@@ -6,7 +6,7 @@ b0783a3d755f9cfece989178b1daf277 *R/KMR.R
 c7a5296ce54f45ef7882e06059f6e04b *R/MDB.R
 af07d74c56ec33f269f81f7f921f740b *R/POK.R
 207e32f12af4ac88a87466e0bb261d99 *R/TKCat.R
-2c4e14b0e68d7b902d1c86c7fba2fd3c *R/chMDB.R
+a48fd6986c34917196d8bebac211d151 *R/chMDB.R
 7c6c738fcc23b18fe60d3fe7c1af1f51 *R/chTKCat.R
 9cf871cae239afe4d95b7a7aa82ed2da *R/collection_members.R
 4a17f64f588e5cc99c3d03506542217d *R/data-model.R
@@ -35,10 +35,10 @@ b5675d38629631f00b0bb098033527f8 *inst/KM-Data-Model/KMR.json
 4a7b26ed08eee8ffbbb639f29d66080c *inst/KM-Data-Model/KMSPEC.json
 db65869a9be8c27ab1628ee08ec2953a *inst/doc/TKCat-KMR-POK.R
 ac7c0d7b7f229d5c25cf725c534c357a *inst/doc/TKCat-KMR-POK.Rmd
-72d4606c591cad058374cfaa5510c766 *inst/doc/TKCat-KMR-POK.html
+e081e9bf544f906b4a231d54182ab7b2 *inst/doc/TKCat-KMR-POK.html
 d8506bcd2ef4a11b4183ee525b2e4f34 *inst/doc/TKCat.R
 53002886ae16469ce4beb4c1db03286f *inst/doc/TKCat.Rmd
-1908800b2fad2a3ec1fca5eb98f7065a *inst/doc/TKCat.html
+a569f4423b36065e84672834146b6001 *inst/doc/TKCat.html
 710d88d3404ceb44a2dda5ddc11d61ba *inst/examples/CHEMBL/DESCRIPTION.json
 2fa41f8e28cc6954bcf761268320c438 *inst/examples/CHEMBL/data/CHEMBL_bio_component_sequences.txt.gz
 7ebd28941c4dcf65ae204362c2dba989 *inst/examples/CHEMBL/data/CHEMBL_biotherapeutic_components.txt.gz
@@ -80,7 +80,7 @@ b18252a647e0528e0318f139b18a314f *inst/examples/ClinVar/model/ClinVar.json
 020fc5523b9ca670462c9e5e208c62ca *inst/examples/ClinVar/model/Collections/Condition-ClinVar_conditions_1.0.json
 e2a0bce3cea6542a20af75f6577b484d *inst/examples/fileMDB-examples.R
 94308a3585b0e7ed8bd474590d4a7e25 *inst/examples/memoMDB-examples.R
-f66c7638d210ec680131f667b8167791 *inst/pkgdown.yml
+44bee8a7286ca5516e4b8ebf677a8700 *inst/pkgdown.yml
 a869a754b242d9046f7247ff672a01f9 *inst/www/TKCat-small.png
 4c7d3f5a957e6d4604357f0c33500dce *inst/www/defChanges.css
 9d52e191dd1c3eb1857374eba347cedb *inst/www/format_bytes.js
