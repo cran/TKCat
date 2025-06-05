@@ -49,14 +49,14 @@ list_tables.DBIConnection <- function(
       "SELECT database, name as table, total_rows, total_bytes",
       "FROM system.tables",
       fquery,
-      ")",
+      ") AS q1",
       "LEFT JOIN",
       "(",
       "SELECT database, table, count() as total_columns",
       ", sum(name='___COLNAMES___') as transposed",
       "FROM system.columns",
       "GROUP BY database, table",
-      ")",
+      ") AS q2",
       "USING database, table"
    )
    toRet <- dplyr::as_tibble(DBI::dbGetQuery(
@@ -212,8 +212,11 @@ ch_insert <- function(
       DBI::dbQuoteIdentifier(con, tableName),
       sep="."
    ))
-   DBI::dbSendQuery(con, sprintf("USE `%s`", dbName))
-   on.exit(DBI::dbSendQuery(con, "USE default"))
+   
+   if(!is.na(con@session)){
+      DBI::dbSendQuery(con, sprintf("USE `%s`", dbName))
+      on.exit(DBI::dbSendQuery(con, "USE default"))
+   }
    
    if(nrow(value)>0){
       fo <- DBI::dbGetQuery(
@@ -238,6 +241,7 @@ ch_insert <- function(
             DBI::dbAppendTable(
                conn=con,
                name=tableName, #qname,
+               database = dbName,
                value=dplyr::slice(value, s[!!i]:e[!!i]),
                row.names=FALSE
                # append=TRUE

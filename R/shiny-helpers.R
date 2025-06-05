@@ -540,7 +540,7 @@ TKCAT_LOGO_DIV <- shiny::div(
          shiny::withProgress(
             message=sprintf("Getting %s metadata", n),
             expr={
-               if(!is.null(access) && access=="none"){
+               if(!is.null(access) && !is.na(access) && access=="none"){
                   mdb <- tryCatch(
                      get_chMDB_metadata(instance$tkcat, n),
                      error = function(e) e
@@ -1519,6 +1519,14 @@ TKCAT_LOGO_DIV <- shiny::div(
                               shiny::tags$strong(n), ":", k$ports[n]
                            )
                         }))
+                     )
+                  }else{
+                     NULL
+                  },
+                  if(!is.na(k$chcon@host_path)){
+                     shiny::tags$li(
+                        shiny::tags$strong("Host path"), ":",
+                        k$chcon@host_path
                      )
                   }else{
                      NULL

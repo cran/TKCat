@@ -11,7 +11,7 @@
 
 <meta name="author" content="Patrice Godard" />
 
-<meta name="date" content="2025-03-17" />
+<meta name="date" content="2025-06-05" />
 
 <title>Introduction to TKCat</title>
 
@@ -7276,7 +7276,7 @@ display: none;
 
 <h1 class="title toc-ignore">Introduction to TKCat</h1>
 <h4 class="author">Patrice Godard</h4>
-<h4 class="date">March 17, 2025</h4>
+<h4 class="date">June 05, 2025</h4>
 
 </div>
 
@@ -7692,7 +7692,7 @@ db_info(mhpo_db)$timestamp &lt;- Sys.time()</code></pre>
 ## For demonstrating ReDaMoR and TKCat capabilities, a very few information from the HPO (human phenotype ontology) has been extracted
 ## (https://hpo.jax.org/)
 ## 
-## Timestamp: 2025-03-17 14:22:14.051995
+## Timestamp: 2025-06-05 06:05:11.909539
 ## </code></pre>
 </div>
 <div id="min-coll-memb" class="section level2" number="2.5">
@@ -7730,7 +7730,7 @@ statement displayed when printing the object:</p>
 ## For demonstrating ReDaMoR and TKCat capabilities, a very few information from the HPO (human phenotype ontology) has been extracted
 ## (https://hpo.jax.org/)
 ## 
-## Timestamp: 2025-03-17 14:22:14.051995
+## Timestamp: 2025-06-05 06:05:11.909539
 ## </code></pre>
 <p>However, as just discussed, the <em>HPO_hp</em> table refers to human
 phenotypes and the <em>HPO_diseases</em> table to human diseases. These
@@ -7823,7 +7823,7 @@ MDB object:</p>
 ## For demonstrating ReDaMoR and TKCat capabilities, a very few information from the HPO (human phenotype ontology) has been extracted
 ## (https://hpo.jax.org/)
 ## 
-## Timestamp: 2025-03-17 14:22:14.051995
+## Timestamp: 2025-06-05 06:05:11.909539
 ## </code></pre>
 <p>And the documented collection members of an MDB can be displayed as
 following:</p>
@@ -7882,7 +7882,7 @@ the corresponding documentation from it back in R:</p>
 ## For demonstrating ReDaMoR and TKCat capabilities, a very few information from the HPO (human phenotype ontology) has been extracted
 ## (https://hpo.jax.org/)
 ## 
-## Timestamp: 2025-03-17 14:22:14
+## Timestamp: 2025-06-05 06:05:11
 ## </code></pre>
 <p>Also writing these data and related information in text files make
 them convenient to share with people using them in other analytical
@@ -8495,10 +8495,10 @@ according to conditions provided in the <em>HPO_diseases</em> and the
 ## 4 Condition  HPO_diseases     2 traitCref     1</code></pre>
 <p>These conditions could be converted using a function provided with
 TKCat (<code>get_collection_mapper(&quot;Condition&quot;)</code>) and which rely
-on the <a href="https://github.com/Elysheba/DODO">DODO package</a> <span class="citation">(<a href="#ref-françois2020">François, Eyll, and Godard
-2020</a>)</span>. The two tables can also be simply concatenated without
-applying any conversion (loosing the advantage of such conversion
-obviously).</p>
+on the <a href="https://github.com/Elysheba/DODO">DODO package</a> <span class="citation">(<a href="#ref-fran%C3%A7ois2020">François, Eyll, and
+Godard 2020</a>)</span>. The two tables can also be simply concatenated
+without applying any conversion (loosing the advantage of such
+conversion obviously).</p>
 <pre class="r"><code>sel_coll &lt;- get_shared_collections(file_hpo, file_clinvar) %&gt;% 
    filter(table.x==&quot;HPO_diseases&quot;, table.y==&quot;traitCref&quot;) %&gt;% 
    mutate(collection=NA)
@@ -8637,72 +8637,66 @@ But TLS wrapping is not supported yet by the RClickhouse package.</p>
 <p>Once connected, this <em>chTKCat</em> object can be used as a
 <em>TKCat</em> object.</p>
 <pre class="r"><code>list_MDBs(k)             # get a specific MDBs from the catalog</code></pre>
-<pre><code>## # A tibble: 17 × 12
+<pre><code>## # A tibble: 24 × 12
 ##    name   title description url   version maintainer public populated timestamps
 ##    &lt;chr&gt;  &lt;chr&gt; &lt;chr&gt;       &lt;chr&gt; &lt;chr&gt;   &lt;chr&gt;      &lt;lgl&gt;  &lt;lgl&gt;     &lt;lgl&gt;     
-##  1 ChEMBL ChEM… &quot;ChEMBL is… http… 1.0.0   [Patrice … TRUE   TRUE      TRUE      
-##  2 DRE-B… Bulk… &quot;Re-interp… http… 0.01    [Patrice … TRUE   TRUE      TRUE      
-##  3 GO     The … &quot;Because o… http… 1.0.0   [Patrice … TRUE   TRUE      TRUE      
-##  4 Galac… Data… &quot;Biorelate… &lt;NA&gt;  1.1.0   [Patrice … TRUE   TRUE      TRUE      
-##  5 HGNC   Anno… &quot;The HUGO … http… 0.0.1   [Patrice … TRUE   TRUE      TRUE      
-##  6 HPA    The … &quot;The Human… http… 0.0.1   [Patrice … TRUE   TRUE      TRUE      
-##  7 HPO    Data… &quot;The Human… http… 1.0.0   [Patrice … TRUE   TRUE      TRUE      
-##  8 MetaB… Data… &quot;MetaBase … http… 0.0.1   [Patrice … TRUE   TRUE      TRUE      
-##  9 Monar… Mona… &quot;The Monar… http… 0.0.1   [Patrice … TRUE   TRUE      TRUE      
-## 10 OmniP… Func… &quot;OmniPath … http… 0.0.3   [Patrice … TRUE   TRUE      TRUE      
-## 11 OpenT… Data… &quot;The Open … http… 1.0.2   [Patrice … TRUE   TRUE      TRUE      
-## 12 PMDB   PMDB… &quot;A dump of… http… 1.0.0   [Patrice … TRUE   TRUE      TRUE      
-## 13 Pangl… Data… &quot;PanglaoDB… http… 1.0.0   [Patrice … TRUE   TRUE      TRUE      
-## 14 PubTa… PubT… &quot;PubTator3… http… 0.0.1   [Patrice … TRUE   TRUE      TRUE      
-## 15 Quive… Prof… &quot;#### Goal… &lt;NA&gt;  &lt;NA&gt;    [Patrice … TRUE   TRUE      TRUE      
-## 16 RDKM   R&amp;D … &quot;Requireme… &lt;NA&gt;  0.1     [Patrice … TRUE   TRUE      TRUE      
-## 17 brain… brai… &quot;Data extr… http… 0.0.1   [Patrice … TRUE   TRUE      TRUE      
+##  1 ChEMBL ChEM… ChEMBL is … http… 1.0.0   [Patrice … TRUE   TRUE      TRUE      
+##  2 Corte… Data… Clarivate … http… 0.0.1   [Patrice … TRUE   TRUE      TRUE      
+##  3 DRE-B… Bulk… Re-interpr… http… 0.01    [Patrice … TRUE   TRUE      TRUE      
+##  4 FCD-T… Bulk… Re-interpr… http… 0.01    [Patrice … TRUE   TRUE      TRUE      
+##  5 GO     The … Because of… http… 1.0.0   [Patrice … TRUE   TRUE      TRUE      
+##  6 GTEx   Geno… The Adult … http… 0.01    [Patrice … TRUE   TRUE      TRUE      
+##  7 Galac… Data… Biorelate&#39;… http… 1.1.0   [Patrice … TRUE   TRUE      TRUE      
+##  8 Globa… Data… GlobalData… http… 0.0.1   [Patrice … TRUE   TRUE      TRUE      
+##  9 HGNC   Anno… The HUGO G… http… 0.0.1   [Patrice … TRUE   TRUE      TRUE      
+## 10 HPA    The … The Human … http… 0.0.1   [Patrice … TRUE   TRUE      TRUE      
+## # ℹ 14 more rows
 ## # ℹ 3 more variables: timestamp &lt;dttm&gt;, access &lt;fct&gt;, total_size &lt;dbl&gt;</code></pre>
 <pre class="r"><code>search_MDB_tables(k, &quot;disease&quot;)  # Search table about &quot;disease&quot;</code></pre>
-<pre><code>## # A tibble: 44 × 3
-##    resource    name                    comment                                  
-##    &lt;chr&gt;       &lt;chr&gt;                   &lt;chr&gt;                                    
-##  1 HPO         Disease_HP              HP presented by diseases                 
-##  2 HPO         Disease_synonyms        Disease synonyms                         
-##  3 HPO         Diseases                Diseases                                 
-##  4 HPA         Disease_involvement     &lt;NA&gt;                                     
-##  5 OpenTargets Associations_by_source  Disease target association by data source
-##  6 OpenTargets Associations_by_type    Disease target association by data type  
-##  7 OpenTargets Associations_overall    Overall disease target association       
-##  8 OpenTargets Diseases_ancestors      Diseases/Phenotypes ancestors            
-##  9 OpenTargets Diseases_and_Phenotypes Core annotation for diseases and phenoty…
-## 10 OpenTargets Diseases_children       Diseases/Phenotypes children             
-## # ℹ 34 more rows</code></pre>
+<pre><code>## # A tibble: 47 × 3
+##    resource    name                   comment                                   
+##    &lt;chr&gt;       &lt;chr&gt;                  &lt;chr&gt;                                     
+##  1 ChEMBL      assay_classification   &quot;Classification scheme for phenotypic ass…
+##  2 Galactic    status                 &quot;Cause-and-effect interactions can be bet…
+##  3 HPA         Disease_involvement     &lt;NA&gt;                                     
+##  4 HPO         Disease_HP             &quot;HP presented by diseases&quot;                
+##  5 HPO         Disease_synonyms       &quot;Disease synonyms&quot;                        
+##  6 HPO         Diseases               &quot;Diseases&quot;                                
+##  7 brainSCOPE  CT_group_conditions    &quot;Experimental condition (e.g.: to be comp…
+##  8 brainSCOPE  Cell_type_conditions   &quot;Experimental condition (e.g.: to be comp…
+##  9 OpenTargets Associations_by_source &quot;Disease target association by data sourc…
+## 10 OpenTargets Associations_by_type   &quot;Disease target association by data type&quot; 
+## # ℹ 37 more rows</code></pre>
 <pre class="r"><code>search_MDB_fields(k, &quot;disease&quot;)  # Search a field about &quot;disease&quot;</code></pre>
-<pre><code>## # A tibble: 111 × 7
-##    resource   table                  name          comment type  nullable unique
-##    &lt;chr&gt;      &lt;chr&gt;                  &lt;chr&gt;         &lt;chr&gt;   &lt;chr&gt; &lt;lgl&gt;    &lt;lgl&gt; 
-##  1 brainSCOPE CT_group_conditions    condition     Condit… char… TRUE     FALSE 
-##  2 brainSCOPE Cell_type_conditions   condition     Condit… char… TRUE     FALSE 
-##  3 brainSCOPE Samples                condition     Condit… char… TRUE     FALSE 
-##  4 brainSCOPE Condition_by_CT_group  exp_condition Experi… char… FALSE    FALSE 
-##  5 brainSCOPE Condition_by_cell_type exp_condition Experi… char… FALSE    FALSE 
-##  6 brainSCOPE Cell_type_conditions   name          Concat… char… FALSE    TRUE  
-##  7 HPO        Disease_HP             db            Diseas… char… FALSE    FALSE 
-##  8 HPO        Disease_synonyms       db            Diseas… char… FALSE    FALSE 
-##  9 HPO        Diseases               db            Diseas… char… FALSE    FALSE 
-## 10 HPO        Disease_HP             id            Diseas… char… FALSE    FALSE 
-## # ℹ 101 more rows</code></pre>
+<pre><code>## # A tibble: 124 × 7
+##    resource              table               name  comment type  nullable unique
+##    &lt;chr&gt;                 &lt;chr&gt;               &lt;chr&gt; &lt;chr&gt;   &lt;chr&gt; &lt;lgl&gt;    &lt;lgl&gt; 
+##  1 FCD-TLE-Bulk-RNA-2019 conditions          cond… &quot;Disea… char… TRUE     TRUE  
+##  2 FCD-TLE-Bulk-RNA-2019 samples             cond… &quot;Disea… char… TRUE     FALSE 
+##  3 HPA                   Disease_involvement dise… &quot;&quot;      char… FALSE    FALSE 
+##  4 DRE-Bulk-RNA-UMC-2024 conditions          cond… &quot;Disea… char… TRUE     FALSE 
+##  5 DRE-Bulk-RNA-UMC-2024 samples             cond… &quot;Disea… char… TRUE     FALSE 
+##  6 DRE-Bulk-RNA-UMC-2024 epilepsies_genetics dise… &quot;&quot;      char… FALSE    FALSE 
+##  7 DRE-Bulk-RNA-UMC-2024 epilepsies_targets  dise… &quot;&quot;      char… FALSE    FALSE 
+##  8 DRE-Bulk-RNA-UMC-2024 epilepsies_targets  dise… &quot;&quot;      nume… FALSE    FALSE 
+##  9 DRE-Bulk-RNA-UMC-2024 genes_epilepsies_a… dise… &quot;&quot;      char… FALSE    FALSE 
+## 10 DRE-Bulk-RNA-UMC-2024 epilepsies_genetics dise… &quot;&quot;      char… FALSE    FALSE 
+## # ℹ 114 more rows</code></pre>
 <pre class="r"><code>collection_members(k)  </code></pre>
-<pre><code>## # A tibble: 35 × 3
+<pre><code>## # A tibble: 43 × 3
 ##    resource              collection table              
 ##    &lt;chr&gt;                 &lt;chr&gt;      &lt;chr&gt;              
 ##  1 ChEMBL                BE         component_sequences
 ##  2 ChEMBL                Condition  drug_indication    
-##  3 DRE-Bulk-RNA-UMC-2024 BE         genes              
-##  4 GO                    BE         Unique_BEIDs       
-##  5 HGNC                  BE         Genes              
-##  6 HGNC                  BE         Ensembl            
-##  7 HGNC                  BE         Entrez             
-##  8 HGNC                  BE         OMIM               
-##  9 HGNC                  BE         Uniprot            
-## 10 HGNC                  BE         MGD                
-## # ℹ 25 more rows</code></pre>
+##  3 Cortellis             BE         target_genes       
+##  4 DRE-Bulk-RNA-UMC-2024 BE         genes              
+##  5 FCD-TLE-Bulk-RNA-2019 BE         genes              
+##  6 GO                    BE         Unique_BEIDs       
+##  7 GTEx                  BE         genes              
+##  8 GTEx                  BE         transcripts        
+##  9 GlobalData            BE         target_genes       
+## 10 HGNC                  BE         Genes              
+## # ℹ 33 more rows</code></pre>
 <pre class="r"><code>explore_MDBs(k)</code></pre>
 </div>
 <div id="pushing-an-mdb-in-a-chtkcat-instance" class="section level2" number="4.3">
@@ -8731,7 +8725,7 @@ object as shown below.</p>
    ch_hpo,
    query=&quot;SELECT * from HPO_diseases WHERE lower(label) LIKE &#39;%epilep%&#39;&quot;
 )</code></pre>
-<pre><code>## # A tibble: 288 × 3
+<pre><code>## # A tibble: 292 × 3
 ##    db    id     label                                                           
 ##    &lt;chr&gt; &lt;chr&gt;  &lt;chr&gt;                                                           
 ##  1 OMIM  117100 Centralopathic epilepsy                                         
@@ -8744,7 +8738,7 @@ object as shown below.</p>
 ##  8 OMIM  213000 Cerebellar hypoplasia/atrophy, epilepsy, and global development…
 ##  9 OMIM  226800 Epilepsy, photogenic, with spastic diplegia and mental retardat…
 ## 10 OMIM  226810 Celiac disease, epilepsy and cerebral calcification syndrome    
-## # ℹ 278 more rows</code></pre>
+## # ℹ 282 more rows</code></pre>
 </div>
 </div>
 <div id="defining-and-using-requirements-for-knowledge-management-kmr" class="section level1" number="5">
@@ -8776,8 +8770,15 @@ ClickHouse database</h3>
 <h4><span class="header-section-number">6.1.1.1</span> Install
 ClickHouse, initialize and configure the TKCat instance</h4>
 <p>The ClickHouse docker container supporting TKCat, its initialization
-and its configuration procedures are implemented here: <a href="https://github.com/patzaw/TKCat/blob/master/ClickHouse/S01-install-and-init.R">S01-install-and-init.R</a>.
-This script should be adapted according to requirements and needs.</p>
+and its configuration procedures are implemented here: <a href="https://github.com/patzaw/TKCat/tree/master/ClickHouse/docker">docker</a>.</p>
+<ol style="list-style-type: decimal">
+<li><p>Update the <em>Dockerfile</em> to select the version of
+ClickHouse to use.</p></li>
+<li><p>Customize and run the following script.</p></li>
+</ol>
+<pre class="sh"><code>
+sh launch-tkcat-instance.sh
+</code></pre>
 <p>Specific attention should be paid on available ports: TCP native port
 (but not TLS wrapping yet) is supported by the <a href="https://github.com/IMSMWU/RClickhouse">RClickhouse</a> R package
 whereas HTTP and HTTP ports are supported by the <a href="https://github.com/patzaw/ClickHouseHTTP">ClickHouseHTTP</a> R
@@ -8787,15 +8788,14 @@ package.</p>
 <div id="cleaning-and-removing-a-tkcat-instance" class="section level4" number="6.1.1.2">
 <h4><span class="header-section-number">6.1.1.2</span> Cleaning and
 removing a TKCat instance</h4>
-<p>When no longer needed, stoping and removing the docker container can
+<p>When no longer needed, stooping and removing the docker container can
 be achieved as exemplified below</p>
 <pre class="sh"><code># In shell
-docker stop tkcat_test
-docker rm tkcat_test
+docker stop test_tkcat
+docker rm test_tkcat
 docker volume prune -f
 # Remove the folder with all the data: `$TKCAT_HOME`.`
-sudo rm -rf ~/Documents/Projects/TKCat_Test
-</code></pre>
+sudo rm -rf /mnt/data1/pgodard/Services-test/test_tkcat_2025.04.18</code></pre>
 </div>
 </div>
 <div id="user-management" class="section level3" number="6.1.2">

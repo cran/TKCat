@@ -184,7 +184,7 @@ get_hosts.chMDB <- function(x, ...){
 #' if TRUE, make relevant alias to query the chMDB
 #' using the table names from the data model. If FALSE, the user must know the
 #' table instance name in the remote database. By default, autoalias is set
-#' to TRUE when using a non-current instance of the database.
+#' to TRUE.
 #' @param ... Additional parameters for [dbGetQuery()] function.
 #' For the ClickHouseHTTP DBI, `format` can be set to "Arrow" (default) or
 #' "TabSeparatedWithNamesAndTypes"
@@ -195,13 +195,21 @@ get_hosts.chMDB <- function(x, ...){
 #' 
 #' @export
 #'
-get_query.chMDB <- function(x, query, autoalias=!is_current_chMDB(x), ...){
+get_query.chMDB <- function(
+   x, query,
+   # autoalias=!is_current_chMDB(x),
+   autoalias = TRUE,
+   ...
+){
    con <- unclass(x)$tkcon$chcon
    n <- unclass(x)$dbInfo$name
-   DBI::dbSendQuery(con, sprintf("USE `%s`", n))
-   on.exit(DBI::dbSendQuery(con, "USE default"))
+   if(!is.na(con@session)){
+      DBI::dbSendQuery(con, sprintf("USE `%s`", n))
+      on.exit(DBI::dbSendQuery(con, "USE default"))
+   }
    if(is.na(autoalias)){
-      autoalias <- FALSE
+      # autoalias <- FALSE
+      autoalias <- TRUE
    }
    if(autoalias){
       dbt <- db_tables(x)$dbTables
@@ -1078,7 +1086,7 @@ dims.chMDB <- function(x, ...){
             },
             nrow=if(all(.data$info=="values")){
                if(.data$transposed[1]){
-                  sum(.data$total_columns)
+                  sum(.data$total_columns) - dplyr::n()
                }else{
                   .data$total_rows[1]
                }
@@ -1089,7 +1097,7 @@ dims.chMDB <- function(x, ...){
                if(.data$transposed[1]){
                   .data$total_rows[1]
                }else{
-                  sum(.data$total_columns)
+                  sum(.data$total_columns) - dplyr::n()
                }
             }else{
                .data$total_rows[which(.data$info=="columns")]
@@ -1250,19 +1258,10 @@ db_tables <- function(x, host){
       length(i)==1
    )
    ## Rstudio hack to avoid DB call when just looking for names
-   cc <- grep('.rs.getCompletionsDollar', deparse(sys.calls()), value=FALSE)
-   if(length(cc)!=0){
-      invisible(NULL)
+   if(.is_called_by_rs_function()){
+      return(.get_virtual_tables(x, i)[[1]])
    }else{
-      cc <- c(
-         grep('.rs.valueContents', deparse(sys.calls()), value=FALSE),
-         grep('.rs.explorer.inspectObject', deparse(sys.calls()), value=FALSE)
-      )
-      if(length(cc)!=0){
-         invisible()
-      }else{
-         return(data_tables(x, dplyr::all_of(i))[[1]])
-      }
+      return(data_tables(x, dplyr::all_of(i))[[1]])
    }
 }
 #' @rdname fileMDB
@@ -1283,9 +1282,8 @@ db_tables <- function(x, host){
 #'
 as.list.chMDB <- function(x, ...){
    ## Rstudio hack to avoid DB call when just looking for names
-   cc <- grep('.rs.getCompletionsDollar', deparse(sys.calls()), value=FALSE)
-   if(length(cc)!=0){
-      invisible(NULL)
+   if(.is_called_by_rs_function()){
+      return(.get_virtual_tables(x, ...))
    }else{
       return(data_tables(x, ...))
    }
@@ -1952,7 +1950,8 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
             clause
          )
       }
-      query <- tquery
+      # query <- tquery
+      queries <- tquery
       if(length(sel) >0 && length(mtables)>1) for(i in 2:length(mtables)){
          if(is.na(sel[1])){
             tquery <- paste(
@@ -1978,22 +1977,41 @@ filter_mdb_matrix.chMDB <- function(x, tableName, ...){
                clause
             )
          }
-         query <- paste0(
-            "SELECT * FROM (",
-            query,
-            ") FULL JOIN (",
-            tquery,
-            ') USING `',
-            dimcol,
-            '`'
-         )
+         # query <- paste0(
+         #    "SELECT * FROM (",
+         #    query,
+         #    ") FULL JOIN (",
+         #    tquery,
+         #    ') USING `',
+         #    dimcol,
+         #    '`'
+         # )
+         queries <- c(queries, tquery)
       }
    
       ## Get the results ----
-      toRet <- get_query(
-         x, query, autoalias=FALSE,
-         format="TabSeparatedWithNamesAndTypes"
+      # toRet <- get_query(
+      #    x, query, autoalias=FALSE,
+      #    format="TabSeparatedWithNamesAndTypes"
+      # )
+      toRet <- lapply(
+         queries,
+         function(q){
+            res <- get_query(
+               x, q, autoalias = FALSE,
+               format="TabSeparatedWithNamesAndTypes"
+            )
+            res[order(res[[dimcol]]),]
+         }
       )
+      if(length(toRet) > 1){
+         toRet <- cbind(
+            toRet[[1]],
+            lapply(toRet[-1], function(r) r[,-1])
+         )
+      }else{
+         toRet <- toRet[[1]]
+      }
       dimname <- toRet[[dimcol]]
       toRet <- toRet[, -which(colnames(toRet)==dimcol), drop=FALSE] %>% 
          as.matrix() %>% 
