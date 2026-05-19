@@ -240,8 +240,7 @@ plot(data_model(file_clinvar))
 
 ## -----------------------------------------------------------------------------
 names(file_clinvar)
-file_clinvar <- file_clinvar %>% 
-   set_names(sub("ClinVar_", "", names(.))) 
+names(file_clinvar) <- sub("ClinVar_", "", names(file_clinvar))
 names(file_clinvar)
 
 ## -----------------------------------------------------------------------------
@@ -317,7 +316,7 @@ collection_members(file_clinvar, "BE")
 get_shared_collections(filtered_clinvar, file_chembl)
 
 ## ----message=FALSE------------------------------------------------------------
-try(BED::connectToBed(a))
+try(BED::connectToBed())
 bedCheck <- try(BED::checkBedConn())
 if(!inherits(bedCheck, "try-error") && bedCheck){
    sel_coll <- get_shared_collections(file_clinvar, file_chembl) %>% 
@@ -368,7 +367,7 @@ knitr::opts_chunk$set(eval=Sys.getenv("USER") %in% c("pgodard"))
 ## ----echo=FALSE---------------------------------------------------------------
 k <- chTKCat(
    host="localhost",                     # default parameter
-   port=9113L,                           # LOCAL PARAMETER
+   port=9111L,                           # LOCAL PARAMETER
    drv=ClickHouseHTTP::ClickHouseHTTP(), # default parameter
    user="default",                       # default parameter
    password=""                           # if not provided the
@@ -552,10 +551,10 @@ plot(data_model(md))
 ch_config_files <- tibble(
    name=c("config.xml", "users.xml"),
    file=c(
-      base64enc::base64encode(
+      encode_bin(
          system.file("ClickHouse/config.xml", package="TKCat")
       ),
-      base64enc::base64encode(
+      encode_bin(
          system.file("ClickHouse/users.xml", package="TKCat")
       )
    )

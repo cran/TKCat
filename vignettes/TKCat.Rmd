@@ -4,7 +4,7 @@ author: "Patrice Godard"
 date:  "`r format(Sys.time(), '%B %d, %Y')`"
 package: "TKCat (version `r packageVersion('TKCat')`)"
 bibliography: TKCat.bib
-link-citations: yes
+link-citations: true
 output:
    rmarkdown::html_document:
       number_sections: yes
@@ -67,17 +67,17 @@ combination in research environments.
 
 In TKCat, knowledge resources are manipulated as modeled
 database (MDB) objects. These objects provide access to the data tables along
-with a general description of the resource and a detail data model generated
+with a general description of the resource and a detailed data model generated
 with [ReDaMoR][redamor] documenting the tables, their
 fields and their relationships. These MDB are then gathered in catalogs that can
-be easily explored an shared. TKCat provides tools to easily subset, filter and
+be easily explored and shared. TKCat provides tools to easily subset, filter and
 combine MDBs and create new catalogs suited for specific needs.
 
 Currently, there are 3 different implementations of MDBs which are supported
 by TKCat: in R memory (memoMDB), in files (fileMDB) and
 in [ClickHouse][clickhouse] (chMDB).
 
-This is document is divided in four main sections:
+This document is divided into four main sections:
 
 - The first one describes how to build an MDB object,
 starting with a minimal example
@@ -166,7 +166,7 @@ if(igraph_available){
 ```
 
 This data model is minimal: only the name of the tables, their fields and their
-types are documented. There is no additional constrain regarding the uniqueness
+types are documented. There is no additional constraint regarding the uniqueness
 or the completeness of the fields. Also there is no information regarding the
 relationships between the different tables.
 The `model_relational_data()` can be used to improve the documentation of the
@@ -372,8 +372,8 @@ mhpo_db
 ```
 
 However, as just discussed, the *HPO_hp* table refers to human phenotypes and
-the *HPO_diseases* table to human diseases. These concept corresponds
-to conditions and those tables can be documented as member of
+the *HPO_diseases* table to human diseases. These concepts correspond
+to conditions and those tables can be documented as members of
 the *Condition* collection.
 
 *Condition* members are documented calling the `add_collection_member()`
@@ -452,7 +452,7 @@ will be described [later](#merging-with-collections) in this document
 
 ## Writing an MDB in files {#min-writing}
 
-Once an MDB has been created and documented in can be written in a directory:
+Once an MDB has been created and documented, it can be written to a directory:
 
 ```{r, results='hide'}
 tmpDir <- tempdir()
@@ -554,7 +554,7 @@ plot(data_model(file_hpo))
 The data model shows that this MDB contains the 3 tables taken into account
 in the minimal example. The additional tables provides mainly supplementary
 details regarding phenotype and diseases.
-Still, the  *HPO_hp* and the *HPO_disease* table are members of
+Still, the *HPO_hp* and the *HPO_diseases* table are members of
 the *Condition* collection and can be documented as such,
 as [explained above](#min-coll-memb).
 
@@ -646,7 +646,7 @@ few functions are specific to each implementation.
 
 ## Exploring information
 
-General information can be retrieved (and potentialy updated)
+General information can be retrieved (and potentially updated)
 using the `db_info()` function.
 
 ```{r}
@@ -667,8 +667,7 @@ following examples).
 
 ```{r}
 names(file_clinvar)
-file_clinvar <- file_clinvar %>% 
-   set_names(sub("ClinVar_", "", names(.))) 
+names(file_clinvar) <- sub("ClinVar_", "", names(file_clinvar))
 names(file_clinvar)
 ```
 
@@ -679,7 +678,7 @@ listed with the `collection_members()` function.
 collection_members(file_clinvar)
 ```
 
-The following functions are use to get the number of tables, the number of
+The following functions are used to get the number of tables, the number of
 fields per table and the number of records.
 
 ```{r}
@@ -887,7 +886,7 @@ package to be installed with a
 connection to BED database in order to run the code below.
 
 ```{r, message=FALSE}
-try(BED::connectToBed(a))
+try(BED::connectToBed())
 bedCheck <- try(BED::checkBedConn())
 if(!inherits(bedCheck, "try-error") && bedCheck){
    sel_coll <- get_shared_collections(file_clinvar, file_chembl) %>% 
@@ -1007,7 +1006,7 @@ the `chTKCat()` function.
 ```{r, echo=FALSE}
 k <- chTKCat(
    host="localhost",                     # default parameter
-   port=9113L,                           # LOCAL PARAMETER
+   port=9111L,                           # LOCAL PARAMETER
    drv=ClickHouseHTTP::ClickHouseHTTP(), # default parameter
    user="default",                       # default parameter
    password=""                           # if not provided the
@@ -1111,6 +1110,57 @@ get_query(
 knitr::opts_chunk$set(eval=TRUE)
 ```
 
+## Data organization in ClickHouse
+
+Several mechanisms have been put in place to take advantage of ClickHouse
+capabilities to store and query big data tables. They rely on the MDB data
+model and its documentation.
+
+1. Table order is very important to optimize data access. When feeding a
+chMDB the order is defined as follows:
+
+   - using the first index in the table data model;
+   - if no index, order by primary key;
+   - if no primary key, order by foreign keys;
+   - if none of the above, take the first column;
+   - Matrices and Sparse Matrices are ordered by rows and columns.
+
+2. Table indexes can accelerate data retrieval, though less efficiently than
+table order. Indexes are also created according to the MDB data model:
+
+   - Use all the indexes but the first one
+   - for character, the index type is: `TYPE bloom_filter(0.01) GRANULARITY 1`
+   - numeric or integer, the index type is: TYPE minmax GRANULARITY 1
+   - indexes are not created for other data types
+
+3. Projections are copies of a whole table but ordered according to other rules.
+They can accelerate some queries on huge tables, but at the cost of disk
+space usage. chMDB projections are defined using the following syntax in the
+table comment of the data model: `{ch_Projection:field2,field1,...}`
+(the projection should be ordered on another field than the one used to
+order the table). Projections are created by default at the end of `as_chMDB()`
+function. However, in some cases it could be more efficient to postpone their
+materialization until the tables are completely fed, by setting
+the `materializeProjections = FALSE` and calling
+the `materialize_chMDB_projections()` function when relevant.
+
+4. When `{LowCardinality}` is added to the comment of a field in the chMDB data
+model, a dictionary will be created on this field in ClickHouse. It can optimize
+queries on such fields with low cardinality on many records.
+
+5. Matrices are not stored directly into one table. Depending on their features
+they are organized differently:
+
+   - regular matrices are stored in a table with an additional
+   column "___ROWNAMES___". The table with the matrix name contains only a
+   pointer to this table.
+   - sparse and large (more than 1000 columns) are stored as a long pivoted
+   table in ClickHouse. The table with the matrix name contains pointers to
+   3 tables: one with row names, one with column names and one with values.
+   - This data organization is transparent for TKCat users when calling the
+   functions `data_tables()`, `heads()`, `[[()`, `$` or `filter_mdb_matrix()`
+   on chMDB objects.
+
 # Defining and using Requirements for Knowledge Management (KMR)
 
 Beside the relational model, no additional constraints are applied to
@@ -1138,7 +1188,7 @@ TKCat](TKCat-KMR-POK.html).
 
 The ClickHouse docker container supporting TKCat, its initialization and its
 configuration procedures are implemented here:
-[docker](https://github.com/patzaw/TKCat/tree/master/ClickHouse/docker).
+[docker](https://github.com/patzaw/TKCat/tree/master/ClickHouse/docker-init).
 
 1. Update the *Dockerfile* to select the version of ClickHouse to use.
 
@@ -1159,7 +1209,7 @@ The data are stored in the `TKCAT_HOME` folder.
 
 #### Cleaning and removing a TKCat instance
 
-When no longer needed, stooping and removing the docker container can be
+When no longer needed, stopping and removing the docker container can be
 achieved as exemplified below
 
 ```{sh, eval=FALSE}
@@ -1185,9 +1235,9 @@ create_chTKCat_user(
 ```
 
 The function will require to setup a password for the new user.
-The admin parameter indicates if the new user have admin right on the whole
+The admin parameter indicates if the new user has admin rights on the whole
 chTKCat instance (default: FALSE). The provider parameter indicates if the
-new user can create and populate new databases whithin the chTKCat instance
+new user can create and populate new databases within the chTKCat instance
 (default: FALSE).
 
 #### Update
@@ -1480,7 +1530,7 @@ a short description of these format and type.
 
 ### Matrices of values
 
-ReDaMoR and TKCat support data frame and matrix objectq. Data frame is the most
+ReDaMoR and TKCat support data frame and matrix objects. Data frame is the most
 used data format from far. However, matrices of values can be useful in some use
 cases. The example below shows how such data format are modeled in ReDaMoR
 as a 3 columns table: one of type "row" corresponding to the row names of the
@@ -1518,10 +1568,10 @@ corresponding data model.
 ch_config_files <- tibble(
    name=c("config.xml", "users.xml"),
    file=c(
-      base64enc::base64encode(
+      encode_bin(
          system.file("ClickHouse/config.xml", package="TKCat")
       ),
-      base64enc::base64encode(
+      encode_bin(
          system.file("ClickHouse/users.xml", package="TKCat")
       )
    )
