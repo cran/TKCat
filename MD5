@@ -1,6 +1,6 @@
-3b38d06a13cc71717ac57fd9103c3a76 *DESCRIPTION
-ea715188d7d161f9b40d49a1484f58f6 *NAMESPACE
-ba0013c26496bbcf796c2c6fa1b4a232 *R/ClickHouse.R
+c30cf811153e97224fe799d58dc5fe56 *DESCRIPTION
+608e151e953b3e809c786aaf4f4297d8 *NAMESPACE
+15bfda5c52bf32e1a2436bf867c4f6d1 *R/ClickHouse.R
 2492e9f8f9e08c097a3eff02b4adb7f0 *R/KM-specifications.R
 605e639e9eba3c967629bc7c38e8b954 *R/KMR.R
 4fc32b3af934d582f427887fff430200 *R/MDB.R
@@ -37,10 +37,10 @@ b5675d38629631f00b0bb098033527f8 *inst/KM-Data-Model/KMR.json
 756bdf1b9bbb6223efb7c97a9e31383f *inst/doc/MDB-helpers.R
 7f2029d62c70f8d7203a294ae0698132 *inst/doc/TKCat-KMR-POK.R
 c9f81dad8523b8c451284bac170e2340 *inst/doc/TKCat-KMR-POK.Rmd
-6fc643aaaf640ce3c3247c666e792fff *inst/doc/TKCat-KMR-POK.html
+2e101379032a9798aee97ad302e0344f *inst/doc/TKCat-KMR-POK.html
 f3a6596ee30d652ef59ca0c1293526ee *inst/doc/TKCat.R
 4ac23899e40900cb49ae8b978c3c89b5 *inst/doc/TKCat.Rmd
-ccd07def232de59ec40c6e9cb713134d *inst/doc/TKCat.html
+d51f979b444d0985d8e03b1b6c00209b *inst/doc/TKCat.html
 710d88d3404ceb44a2dda5ddc11d61ba *inst/examples/CHEMBL/DESCRIPTION.json
 2fa41f8e28cc6954bcf761268320c438 *inst/examples/CHEMBL/data/CHEMBL_bio_component_sequences.txt.gz
 7ebd28941c4dcf65ae204362c2dba989 *inst/examples/CHEMBL/data/CHEMBL_biotherapeutic_components.txt.gz
@@ -82,7 +82,7 @@ b18252a647e0528e0318f139b18a314f *inst/examples/ClinVar/model/ClinVar.json
 020fc5523b9ca670462c9e5e208c62ca *inst/examples/ClinVar/model/Collections/Condition-ClinVar_conditions_1.0.json
 e2a0bce3cea6542a20af75f6577b484d *inst/examples/fileMDB-examples.R
 94308a3585b0e7ed8bd474590d4a7e25 *inst/examples/memoMDB-examples.R
-13f2e41ca2f5e9aa82ab2e33fe545393 *inst/pkgdown.yml
+d71f063758db82e8bbe31257daa90d23 *inst/pkgdown.yml
 a869a754b242d9046f7247ff672a01f9 *inst/www/TKCat-small.png
 4c7d3f5a957e6d4604357f0c33500dce *inst/www/defChanges.css
 9d52e191dd1c3eb1857374eba347cedb *inst/www/format_bytes.js
@@ -110,6 +110,8 @@ bfaf1c2221a7836cec6ace59c0a46d59 *man/as_chMDB.Rd
 19f6bfbd38f31996692c08ffcfd3dada *man/chMDB.Rd
 2018cc0adb75fee0fa6620b14861c6f1 *man/chTKCat.Rd
 cb22e1b878952ffb7419d9069c13af56 *man/ch_insert.Rd
+82aee372dea9d75229db2ab2a3e5f2d2 *man/ch_join_query.Rd
+8e6a607dcff1d76e9f1d9bae56519df7 *man/ch_union_query.Rd
 9eb53b110b1c4a11b52196bf994b0ea8 *man/change_chTKCat_password.Rd
 88888e80044de7775faf22e76d093df6 *man/check_chTKCat.Rd
 3afa1cf5b7b5ef5cb6da500e27c9f874 *man/collection_members.Rd

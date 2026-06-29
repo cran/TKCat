@@ -11,7 +11,7 @@
 
 <meta name="author" content="Patrice Godard" />
 
-<meta name="date" content="2026-05-19" />
+<meta name="date" content="2026-06-12" />
 
 <title>Introduction to TKCat</title>
 
@@ -7275,7 +7275,7 @@ display: none;
 
 <h1 class="title toc-ignore">Introduction to TKCat</h1>
 <h4 class="author">Patrice Godard</h4>
-<h4 class="date">May 19, 2026</h4>
+<h4 class="date">June 12, 2026</h4>
 
 </div>
 
@@ -7693,7 +7693,7 @@ db_info(mhpo_db)$timestamp &lt;- Sys.time()</code></pre>
 ## For demonstrating ReDaMoR and TKCat capabilities, a very few information from the HPO (human phenotype ontology) has been extracted
 ## (https://hpo.jax.org/)
 ## 
-## Timestamp: 2026-05-19 17:24:40.662433
+## Timestamp: 2026-06-12 07:04:41.830826
 ## </code></pre>
 </div>
 <div id="min-coll-memb" class="section level2" number="2.5">
@@ -7731,7 +7731,7 @@ statement displayed when printing the object:</p>
 ## For demonstrating ReDaMoR and TKCat capabilities, a very few information from the HPO (human phenotype ontology) has been extracted
 ## (https://hpo.jax.org/)
 ## 
-## Timestamp: 2026-05-19 17:24:40.662433
+## Timestamp: 2026-06-12 07:04:41.830826
 ## </code></pre>
 <p>However, as just discussed, the <em>HPO_hp</em> table refers to human
 phenotypes and the <em>HPO_diseases</em> table to human diseases. These
@@ -7824,7 +7824,7 @@ MDB object:</p>
 ## For demonstrating ReDaMoR and TKCat capabilities, a very few information from the HPO (human phenotype ontology) has been extracted
 ## (https://hpo.jax.org/)
 ## 
-## Timestamp: 2026-05-19 17:24:40.662433
+## Timestamp: 2026-06-12 07:04:41.830826
 ## </code></pre>
 <p>And the documented collection members of an MDB can be displayed as
 following:</p>
@@ -7883,7 +7883,7 @@ the corresponding documentation from it back in R:</p>
 ## For demonstrating ReDaMoR and TKCat capabilities, a very few information from the HPO (human phenotype ontology) has been extracted
 ## (https://hpo.jax.org/)
 ## 
-## Timestamp: 2026-05-19 17:24:40
+## Timestamp: 2026-06-12 07:04:41
 ## </code></pre>
 <p>Also writing these data and related information in text files make
 them convenient to share with people using them in other analytical
@@ -8652,7 +8652,7 @@ But TLS wrapping is not supported yet by the RClickhouse package.</p>
 ## # ℹ 20 more rows
 ## # ℹ 3 more variables: timestamp &lt;dttm&gt;, access &lt;fct&gt;, total_size &lt;dbl&gt;</code></pre>
 <pre class="r"><code>search_MDB_tables(k, &quot;disease&quot;)  # Search table about &quot;disease&quot;</code></pre>
-<pre><code>## # A tibble: 54 × 3
+<pre><code>## # A tibble: 56 × 3
 ##    resource            name                               comment               
 ##    &lt;chr&gt;               &lt;chr&gt;                              &lt;chr&gt;                 
 ##  1 AP-Disease-Strategy diseases                           &lt;NA&gt;                  
@@ -8662,12 +8662,12 @@ But TLS wrapping is not supported yet by the RClickhouse package.</p>
 ##  5 AP-Disease-Strategy diseases_parents                   &lt;NA&gt;                  
 ##  6 AP-Disease-Strategy diseases_synonyms                  &lt;NA&gt;                  
 ##  7 AP-Disease-Strategy general_disease_groups_identifiers General group of dise…
-##  8 ChEMBL              assay_classification               Classification scheme…
+##  8 HPA                 Disease_involvement                &lt;NA&gt;                  
 ##  9 HPO                 Disease_HP                         HP presented by disea…
 ## 10 HPO                 Disease_synonyms                   Disease synonyms      
-## # ℹ 44 more rows</code></pre>
+## # ℹ 46 more rows</code></pre>
 <pre class="r"><code>search_MDB_fields(k, &quot;disease&quot;)  # Search a field about &quot;disease&quot;</code></pre>
-<pre><code>## # A tibble: 155 × 7
+<pre><code>## # A tibble: 165 × 7
 ##    resource            table                 name  comment type  nullable unique
 ##    &lt;chr&gt;               &lt;chr&gt;                 &lt;chr&gt; &lt;chr&gt;   &lt;chr&gt; &lt;lgl&gt;    &lt;lgl&gt; 
 ##  1 AP-Disease-Strategy strategic_indications cate… &quot;pheno… char… FALSE    FALSE 
@@ -8680,7 +8680,7 @@ But TLS wrapping is not supported yet by the RClickhouse package.</p>
 ##  8 AP-Disease-Strategy cci_target_indicatio… dise… &quot;&quot;      char… TRUE     FALSE 
 ##  9 AP-Disease-Strategy cddi_drug_indications dise… &quot;&quot;      char… TRUE     FALSE 
 ## 10 AP-Disease-Strategy cddi_drug_indication… dise… &quot;&quot;      char… TRUE     FALSE 
-## # ℹ 145 more rows</code></pre>
+## # ℹ 155 more rows</code></pre>
 <pre class="r"><code>collection_members(k)  </code></pre>
 <pre><code>## # A tibble: 50 × 3
 ##    resource              collection table                   
