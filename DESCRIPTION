@@ -1,7 +1,7 @@
 Package: TKCat
 Type: Package
 Title: Tailored Knowledge Catalog
-Version: 1.2.2
+Version: 1.2.3
 Authors@R: c(
     person(
         "Patrice", "Godard",
@@ -31,10 +31,10 @@ Suggests: knitr, rmarkdown, RClickhouse, stringr, data.tree, BED
 License: GPL-3
 Encoding: UTF-8
 VignetteBuilder: knitr
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0
 NeedsCompilation: no
-Packaged: 2026-06-12 05:05:04 UTC; pgodard
+Packaged: 2026-08-10 07:49:10 UTC; pgodard
 Author: Patrice Godard [aut, cre, cph]
 Maintainer: Patrice Godard <patrice.godard@gmail.com>
 Repository: CRAN
-Date/Publication: 2026-06-29 08:20:02 UTC
+Date/Publication: 2026-08-20 13:02:12 UTC
