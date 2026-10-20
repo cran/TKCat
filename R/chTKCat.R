@@ -1262,7 +1262,7 @@ list_MDBs.chTKCat <- function(x, withInfo = TRUE) {
             ),
             collapse = " UNION ALL "
           ),
-          ") AS q1 LEFT JOIN ",
+          ") AS q1 FULL JOIN ",
           " (SELECT database AS db, total_rows FROM system.tables ",
           " WHERE name='___Timestamps___') AS q2 USING db"
         ),
@@ -1355,6 +1355,7 @@ list_MDBs.chTKCat <- function(x, withInfo = TRUE) {
 #' @export
 #'
 search_MDB_tables.chTKCat <- function(x, searchTerm) {
+  searchTerm <- .ch_escape_string(searchTerm)
   mdbs <- list_MDBs(x)
   selQueries <- paste(
     sprintf(
@@ -1413,6 +1414,7 @@ search_MDB_tables.chTKCat <- function(x, searchTerm) {
 #' @export
 #'
 search_MDB_fields.chTKCat <- function(x, searchTerm) {
+  searchTerm <- .ch_escape_string(searchTerm)
   mdbs <- list_MDBs(x)
   selQueries <- paste(
     sprintf(

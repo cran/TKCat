@@ -367,7 +367,7 @@ knitr::opts_chunk$set(eval=Sys.getenv("USER") %in% c("pgodard"))
 ## ----echo=FALSE---------------------------------------------------------------
 k <- chTKCat(
    host="localhost",                     # default parameter
-   port=9111L,                           # LOCAL PARAMETER
+   port=9113L,                           # LOCAL PARAMETER (default: 9111L)
    drv=ClickHouseHTTP::ClickHouseHTTP(), # default parameter
    user="default",                       # default parameter
    password=""                           # if not provided the
